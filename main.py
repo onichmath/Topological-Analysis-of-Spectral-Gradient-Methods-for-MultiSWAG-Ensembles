@@ -6,7 +6,9 @@ from models.MLP import MLP
 from utils.parser import build_parser
 from experiments.baseline import baseline
 from utils.transforms import get_transform, get_corrupt_transform
+from utils.dataloaders import build_train_dataloader, build_test_dataloader
 from push.bayes.swag import MultiSWAG, train_mswag
+from torchvision.transforms import Compose
 
 
 def create_optimizer(lr):
@@ -39,32 +41,24 @@ def main():
     parser = build_parser()
     args = parser.parse_args()
 
-    transform = get_transform()
-    corrupt_transform = get_corrupt_transform()
+    train_dataloader, val_dataloader = build_train_dataloader(
+        data_dir="./data",
+        batch_size=args.batch_size,
+        val_size=args.val_size,
+        transform=get_transform(),
+        seed=args.seed,
+    )
 
-    train_dataset: datasets.mnist.MNIST = datasets.MNIST(
-        root="./data", train=True, download=True, transform=transform
+    test_dataloader: DataLoader = build_test_dataloader(
+        data_dir="./data",
+        batch_size=args.batch_size,
+        transform=get_transform(),
     )
-    test_dataset: datasets.mnist.MNIST = datasets.MNIST(
-        root="./data", train=False, download=True, transform=corrupt_transform
+    test_corrupt_dataloader: DataLoader = build_test_dataloader(
+        data_dir="./data",
+        batch_size=args.batch_size,
+        transform=get_corrupt_transform(),
     )
-    # test_dataset_corrupted: datasets.mnist.MNIST = datasets.MNIST(
-    #     root="./data", train=False, download=True, transform=corrupt_transform
-    # )
-    print(train_dataset.data.shape)
-    print(test_dataset.data.shape)
-
-    train_dataloader: DataLoader = DataLoader(
-        train_dataset, batch_size=args.batch_size, shuffle=True
-    )
-    test_dataloader: DataLoader = DataLoader(
-        test_dataset, batch_size=args.batch_size, shuffle=False
-    )
-    # test_dataloader_corrupted: DataLoader = DataLoader(
-    #     test_dataset_corrupted, batch_size=args.batch_size, shuffle=False
-    # )
-
-    # mswag = pus
     model_args: tuple = (
         {
             "input_dim": args.input_dim,
@@ -89,9 +83,9 @@ def main():
 
     posterior_preds = mswag.posterior_pred(
         test_dataloader,
-        num_samples=4,  # Number of models used for preds: num particles x num samples
+        num_samples=2,  # Number of models used for preds: num particles x num samples
         f_reg=False,
-        # loss_fn=torch.nn.CrossEntropyLoss(),
+        loss_fn=torch.nn.CrossEntropyLoss(),
         mode=[
             "mean",
             "mode",
@@ -104,12 +98,12 @@ def main():
     mean_pred = posterior_preds["mean"]
     print(type(mean_pred))
     print(mean_pred.shape)
-    mean_acc = (mean_pred == test_dataset.targets).float().mean()
+    mean_acc = (mean_pred == test_dataloader.dataset.targets).float().mean()
     print(f"Mean Accuracy: {mean_acc}")
 
     mode_pred = posterior_preds["mode"]
     print(mode_pred.shape)
-    mode_acc = (mode_pred == test_dataset.targets).float().mean()
+    mode_acc = (mode_pred == test_dataloader.dataset.targets).float().mean()
     print(f"Mode Accuracy: {mode_acc}")
 
     # Pac Bayes vs Bayesian, is this paper testing agaisnt multiswag or just MCMC?

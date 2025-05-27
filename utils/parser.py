@@ -10,12 +10,12 @@ def build_parser():
         "--lr", type=float, default=0.01, help="Learning rate for the optimizer"
     )
     parser.add_argument(
-        "--pretrain_epochs", type=int, default=5, help="Number of epochs for training"
+        "--pretrain_epochs", type=int, default=1, help="Number of epochs for training"
     )
     parser.add_argument(
         "--swag_epochs",
         type=int,
-        default=2,
+        default=1,
         help="Number of epochs for SWAG training",
     )
     parser.add_argument(
@@ -53,5 +53,17 @@ def build_parser():
         type=int,
         default=2,
         help="Number of samples (model params) from each particle",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for reproducibility",
+    )
+    parser.add_argument(
+        "--val_size",
+        type=int,
+        default=10000,
+        help="Size of the validation set (default: 10000)",
     )
     return parser
