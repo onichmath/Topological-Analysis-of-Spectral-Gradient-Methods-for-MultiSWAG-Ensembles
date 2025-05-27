@@ -1,0 +1,57 @@
+import argparse
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(description="MNIST DataLoader Example")
+    parser.add_argument(
+        "--batch_size", type=int, default=512, help="Batch size for DataLoader"
+    )
+    parser.add_argument(
+        "--lr", type=float, default=0.01, help="Learning rate for the optimizer"
+    )
+    parser.add_argument(
+        "--pretrain_epochs", type=int, default=5, help="Number of epochs for training"
+    )
+    parser.add_argument(
+        "--swag_epochs",
+        type=int,
+        default=2,
+        help="Number of epochs for SWAG training",
+    )
+    parser.add_argument(
+        "--cov_mat_rank",
+        type=int,
+        default=20,
+        help="Rank of covariance matrix (used during posterior predictive inference)",
+    )
+    parser.add_argument(
+        "--num_models",
+        type=int,
+        default=2,
+        help="Number of models in the SWAG ensemble",
+    )
+    parser.add_argument(
+        "--input_dim",
+        type=int,
+        default=28 * 28,
+        help="Input dimension for the model",
+    )
+    parser.add_argument(
+        "--hidden_dim",
+        type=int,
+        default=56,
+        help="Hidden dimension for the model",
+    )
+    parser.add_argument(
+        "--output_dim",
+        type=int,
+        default=10,
+        help="Output dimension for the model",
+    )
+    parser.add_argument(
+        "--num_samples",
+        type=int,
+        default=2,
+        help="Number of samples (model params) from each particle",
+    )
+    return parser
