@@ -10,12 +10,12 @@ def build_parser():
         "--lr", type=float, default=0.01, help="Learning rate for the optimizer"
     )
     parser.add_argument(
-        "--pretrain_epochs", type=int, default=3, help="Number of epochs for training"
+        "--pretrain_epochs", type=int, default=30, help="Number of epochs for training"
     )
     parser.add_argument(
         "--swag_epochs",
         type=int,
-        default=2,
+        default=20,
         help="Number of epochs for SWAG training",
     )
     parser.add_argument(
@@ -27,7 +27,7 @@ def build_parser():
     parser.add_argument(
         "--num_models",
         type=int,
-        default=2,
+        default=20,
         help="Number of models in the SWAG ensemble",
     )
     parser.add_argument(
@@ -39,7 +39,7 @@ def build_parser():
     parser.add_argument(
         "--hidden_dim",
         type=int,
-        default=128,
+        default=256,
         help="Hidden dimension for the model",
     )
     parser.add_argument(
@@ -57,7 +57,7 @@ def build_parser():
     parser.add_argument(
         "--num_samples",
         type=int,
-        default=2,
+        default=10,
         help="Number of samples (model params) from each particle",
     )
     parser.add_argument(
@@ -75,7 +75,7 @@ def build_parser():
     parser.add_argument(
         "--optimizer",
         type=str,
-        default="adam",
+        default="muon",
         choices=["adam", "muon"],
         help="Optimizer to use for training (default: adam)",
     )

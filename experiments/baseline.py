@@ -4,9 +4,6 @@ import inspect
 
 
 def baseline(train_dataloader, test_dataloader, test_dataloader_corrupted, model_args):
-    # NOTE: We are not performing a hyperparameter search for either the MLP or the SWAG so we are not using a validation set
-    # Instead, we are assuming the final model is given by the 10th epoch parameters
-
     if inspect.currentframe().f_back.f_code.co_name != "main":
         raise ValueError("This function should only be called from main")
 

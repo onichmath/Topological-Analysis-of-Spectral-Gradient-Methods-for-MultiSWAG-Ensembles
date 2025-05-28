@@ -60,6 +60,7 @@ def main():
     create_optimizer = (
         create_muon_optimizer if args.optimizer == "muon" else create_adam_optimizer
     )
+    print(create_optimizer)
 
     model_args = (
         {
