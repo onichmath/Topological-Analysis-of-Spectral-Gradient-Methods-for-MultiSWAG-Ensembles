@@ -1,15 +1,11 @@
-import torchvision.transforms as transforms
-import torchvision.datasets as datasets
 from torch.utils.data import DataLoader
 import torch
 from models.MLP import MLP
 from utils.parser import build_parser
-from experiments.baseline import baseline
 from utils.transforms import get_transform, get_corrupt_transform
-from utils.dataloaders import build_train_dataloaders, build_test_dataloaders
+from utils.dataloaders import build_train_dataloaders
 from utils.optimizers import create_adam_optimizer, create_muon_optimizer
 from push.bayes.swag import MultiSWAG, train_mswag
-from torchvision.transforms import Compose
 
 
 def evaluate_predictions(preds: dict, dataloader: DataLoader, label=""):
@@ -30,10 +26,12 @@ def evaluate_predictions(preds: dict, dataloader: DataLoader, label=""):
     print(f"[{label}] Mode Accuracy: {mode_acc:.4f}")
 
 
-def run_posterior_eval(mswag: MultiSWAG, dataloader: DataLoader, label: str):
+def run_posterior_eval(
+    mswag: MultiSWAG, num_samples: int, dataloader: DataLoader, label: str
+):
     preds = mswag.posterior_pred(
         dataloader,
-        num_samples=2,
+        num_samples=num_samples,
         f_reg=False,
         loss_fn=torch.nn.CrossEntropyLoss(),
         mode=["mean", "mode", "std", "logits", "prob"],
@@ -59,6 +57,10 @@ def main():
         seed=args.seed,
     )
 
+    create_optimizer = (
+        create_muon_optimizer if args.optimizer == "muon" else create_adam_optimizer
+    )
+
     model_args = (
         {
             "input_dim": args.input_dim,
@@ -71,7 +73,7 @@ def main():
     mswag = train_mswag(
         train_dataloader,
         torch.nn.CrossEntropyLoss(),
-        create_adam_optimizer,
+        create_optimizer,
         args.pretrain_epochs,
         args.swag_epochs,
         MLP,
@@ -82,10 +84,10 @@ def main():
     )
 
     print("\nEvaluating on in-distribution validation set:")
-    run_posterior_eval(mswag, val_dataloader, label="ID")
+    run_posterior_eval(mswag, args.num_samples, val_dataloader, label="ID")
 
     print("\nEvaluating on out-of-distribution corrupted validation set:")
-    run_posterior_eval(mswag, val_corrupt_dataloader, label="OOD")
+    run_posterior_eval(mswag, args.num_samples, val_corrupt_dataloader, label="OOD")
     # Pac Bayes vs Bayesian, is this paper testing agaisnt multiswag or just MCMC?
     # https://arxiv.org/html/2406.05469v1#S3
 

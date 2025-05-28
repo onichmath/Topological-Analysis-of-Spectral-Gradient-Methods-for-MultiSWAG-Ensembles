@@ -39,7 +39,7 @@ def build_parser():
     parser.add_argument(
         "--hidden_dim",
         type=int,
-        default=64,
+        default=128,
         help="Hidden dimension for the model",
     )
     parser.add_argument(
@@ -71,5 +71,12 @@ def build_parser():
         type=int,
         default=10000,
         help="Size of the validation set (default: 10000)",
+    )
+    parser.add_argument(
+        "--optimizer",
+        type=str,
+        default="adam",
+        choices=["adam", "muon"],
+        help="Optimizer to use for training (default: adam)",
     )
     return parser
