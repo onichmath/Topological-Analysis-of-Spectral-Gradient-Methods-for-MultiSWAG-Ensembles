@@ -4,18 +4,18 @@ import argparse
 def build_parser():
     parser = argparse.ArgumentParser(description="MNIST DataLoader Example")
     parser.add_argument(
-        "--batch_size", type=int, default=512, help="Batch size for DataLoader"
+        "--batch_size", type=int, default=256, help="Batch size for DataLoader"
     )
     parser.add_argument(
         "--lr", type=float, default=0.01, help="Learning rate for the optimizer"
     )
     parser.add_argument(
-        "--pretrain_epochs", type=int, default=1, help="Number of epochs for training"
+        "--pretrain_epochs", type=int, default=3, help="Number of epochs for training"
     )
     parser.add_argument(
         "--swag_epochs",
         type=int,
-        default=1,
+        default=2,
         help="Number of epochs for SWAG training",
     )
     parser.add_argument(
@@ -39,8 +39,14 @@ def build_parser():
     parser.add_argument(
         "--hidden_dim",
         type=int,
-        default=56,
+        default=64,
         help="Hidden dimension for the model",
+    )
+    parser.add_argument(
+        "--num_hidden_layers",
+        type=int,
+        default=2,
+        help="Number of hidden layers in the model",
     )
     parser.add_argument(
         "--output_dim",
