@@ -6,115 +6,88 @@ from models.MLP import MLP
 from utils.parser import build_parser
 from experiments.baseline import baseline
 from utils.transforms import get_transform, get_corrupt_transform
-from utils.dataloaders import build_train_dataloader, build_test_dataloader
+from utils.dataloaders import build_train_dataloaders, build_test_dataloaders
+from utils.optimizers import create_adam_optimizer, create_muon_optimizer
 from push.bayes.swag import MultiSWAG, train_mswag
 from torchvision.transforms import Compose
 
 
-def create_optimizer(lr):
-    """
-    Create a function that returns Adam optimizer with a specific learning rate.
+def evaluate_predictions(preds: dict, dataloader: DataLoader, label=""):
+    if isinstance(dataloader.dataset, torch.utils.data.Subset):
+        base_dataset = dataloader.dataset.dataset
+        indices = dataloader.dataset.indices
+        targets = torch.tensor(base_dataset.targets)[indices]
+    else:
+        targets = dataloader.dataset.targets
 
-    Args:
-        lr (float): Learning rate for the optimizer.
+    mean_pred = preds["mean"]
+    mode_pred = preds["mode"]
 
-    Returns:
-        function: Function that generates Adam optimizer with the specified learning rate.
-    """
+    mean_acc = (mean_pred == targets).float().mean()
+    mode_acc = (mode_pred == targets).float().mean()
 
-    def mk_optim(params):
-        """
-        Returns Adam optimizer with the specified learning rate.
+    print(f"[{label}] Mean Accuracy: {mean_acc:.4f}")
+    print(f"[{label}] Mode Accuracy: {mode_acc:.4f}")
 
-        Args:
-            params: Model parameters.
 
-        Returns:
-            torch.optim.Adam: Adam optimizer.
-        """
-        return torch.optim.Adam(params, lr=lr, weight_decay=lr / 1e3)
-
-    return mk_optim
+def run_posterior_eval(mswag: MultiSWAG, dataloader: DataLoader, label: str):
+    preds = mswag.posterior_pred(
+        dataloader,
+        num_samples=2,
+        f_reg=False,
+        loss_fn=torch.nn.CrossEntropyLoss(),
+        mode=["mean", "mode", "std", "logits", "prob"],
+    )
+    evaluate_predictions(preds, dataloader, label)
 
 
 def main():
-    parser = build_parser()
-    args = parser.parse_args()
+    """
+    Main function for training MultiSWAG model and evaluating on ID and OOD validation datasets.
+    """
+    # TODO: evaluate on train set for epistemic uncertainty
+    # TODO: evaluate on test set for aleatoric uncertainty
+    # Note: p_params is list of [tensor(num_models, model_params, layer)]
+    args = build_parser().parse_args()
 
-    train_dataloader, val_dataloader = build_train_dataloader(
+    train_dataloader, val_dataloader, val_corrupt_dataloader = build_train_dataloaders(
         data_dir="./data",
         batch_size=args.batch_size,
         val_size=args.val_size,
         transform=get_transform(),
+        corrupt_transform=get_corrupt_transform(),
         seed=args.seed,
     )
 
-    test_dataloader: DataLoader = build_test_dataloader(
-        data_dir="./data",
-        batch_size=args.batch_size,
-        transform=get_transform(),
-    )
-    test_corrupt_dataloader: DataLoader = build_test_dataloader(
-        data_dir="./data",
-        batch_size=args.batch_size,
-        transform=get_corrupt_transform(),
-    )
-    model_args: tuple = (
+    model_args = (
         {
             "input_dim": args.input_dim,
             "hidden_dim": args.hidden_dim,
             "output_dim": args.output_dim,
+            "num_hidden_layers": args.num_hidden_layers,
         },
     )
-    mswag: MultiSWAG = train_mswag(
+
+    mswag = train_mswag(
         train_dataloader,
         torch.nn.CrossEntropyLoss(),
-        # create_optimizer,
+        create_adam_optimizer,
         args.pretrain_epochs,
         args.swag_epochs,
         MLP,
         *model_args,
         cov_mat_rank=args.cov_mat_rank,
         num_models=args.num_models,
-    )
-    # TODO: evaluate on train set for epistemic uncertainty
-    # TODO: evaluate on test set for aleatoric uncertainty
-    # Note: p_params is list of [tensor(num_models, model_params, layer)]
-
-    posterior_preds = mswag.posterior_pred(
-        test_dataloader,
-        num_samples=2,  # Number of models used for preds: num particles x num samples
-        f_reg=False,
-        loss_fn=torch.nn.CrossEntropyLoss(),
-        mode=[
-            "mean",
-            "mode",
-            "std",
-            "logits",
-        ],  # Mode := standard NN since it only uses most likely weights
+        f_save=False,
     )
 
-    print(posterior_preds.keys())
-    mean_pred = posterior_preds["mean"]
-    print(type(mean_pred))
-    print(mean_pred.shape)
-    mean_acc = (mean_pred == test_dataloader.dataset.targets).float().mean()
-    print(f"Mean Accuracy: {mean_acc}")
+    print("\nEvaluating on in-distribution validation set:")
+    run_posterior_eval(mswag, val_dataloader, label="ID")
 
-    mode_pred = posterior_preds["mode"]
-    print(mode_pred.shape)
-    mode_acc = (mode_pred == test_dataloader.dataset.targets).float().mean()
-    print(f"Mode Accuracy: {mode_acc}")
-
+    print("\nEvaluating on out-of-distribution corrupted validation set:")
+    run_posterior_eval(mswag, val_corrupt_dataloader, label="OOD")
     # Pac Bayes vs Bayesian, is this paper testing agaisnt multiswag or just MCMC?
     # https://arxiv.org/html/2406.05469v1#S3
-
-    # TODO: Compare mean vs mode vs baseline of regularly trained model
-    # 1 layer ensemble vs 2 layer non ensemble vs convnet non ensemble
-
-    # TRAin the MLP
-
-    # NOTE: Instead of a hyperparameter search, we use best params from other experiments
 
 
 if __name__ == "__main__":
