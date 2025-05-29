@@ -1,48 +1,17 @@
-from torch.utils.data import DataLoader
 import torch
 from models.MLP import MLP
 from utils.parser import build_parser
 from utils.transforms import get_transform, get_corrupt_transform
 from utils.dataloaders import build_train_dataloaders
 from utils.optimizers import map_create_optimizer
-from push.bayes.swag import MultiSWAG, train_mswag
+from push.bayes.swag import train_mswag
+from utils.eval import run_posterior_eval
 
 # TODO: function space filtration on test + test corrupt
 # TODO: train set evaluation for epistemic uncertainty + test set for aleatoric uncertainty
 # TODO: weight space filtration over time (delta?)
 # TODO: cov mat as distance matrix or PCD?
 # TODO: eNTK?
-
-
-def evaluate_predictions(preds: dict, dataloader: DataLoader, label=""):
-    if isinstance(dataloader.dataset, torch.utils.data.Subset):
-        base_dataset = dataloader.dataset.dataset
-        indices = dataloader.dataset.indices
-        targets = torch.tensor(base_dataset.targets)[indices]
-    else:
-        targets = dataloader.dataset.targets
-
-    mean_pred = preds["mean"]
-    mode_pred = preds["mode"]
-
-    mean_acc = (mean_pred == targets).float().mean()
-    mode_acc = (mode_pred == targets).float().mean()
-
-    print(f"[{label}] Mean Accuracy: {mean_acc:.4f}")
-    print(f"[{label}] Mode Accuracy: {mode_acc:.4f}")
-
-
-def run_posterior_eval(
-    mswag: MultiSWAG, num_samples: int, dataloader: DataLoader, label: str
-):
-    preds = mswag.posterior_pred(
-        dataloader,
-        num_samples=num_samples,
-        f_reg=False,
-        loss_fn=torch.nn.CrossEntropyLoss(),
-        mode=["mean", "mode", "std", "logits", "prob"],
-    )
-    evaluate_predictions(preds, dataloader, label)
 
 
 def main():
