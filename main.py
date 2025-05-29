@@ -4,8 +4,14 @@ from models.MLP import MLP
 from utils.parser import build_parser
 from utils.transforms import get_transform, get_corrupt_transform
 from utils.dataloaders import build_train_dataloaders
-from utils.optimizers import create_adam_optimizer, create_muon_optimizer
+from utils.optimizers import map_create_optimizer
 from push.bayes.swag import MultiSWAG, train_mswag
+
+# TODO: function space filtration on test + test corrupt
+# TODO: train set evaluation for epistemic uncertainty + test set for aleatoric uncertainty
+# TODO: weight space filtration over time (delta?)
+# TODO: cov mat as distance matrix or PCD?
+# TODO: eNTK?
 
 
 def evaluate_predictions(preds: dict, dataloader: DataLoader, label=""):
@@ -57,10 +63,7 @@ def main():
         seed=args.seed,
     )
 
-    create_optimizer = (
-        create_muon_optimizer if args.optimizer == "muon" else create_adam_optimizer
-    )
-    print(create_optimizer)
+    create_optimizer = map_create_optimizer(args.optimizer)
 
     model_args = (
         {
