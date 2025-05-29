@@ -1,5 +1,5 @@
 import argparse
-
+import torch
 
 def add_train_subparser(subparsers):
     train_parser = subparsers.add_parser(
@@ -83,6 +83,66 @@ def add_eval_subparser(subparsers):
         default=10,
         help="Number of samples (model params) from each particle",
     )
+    eval_parser.add_argument(
+        "--cov_mat_rank",
+        type=int,
+        default=20,
+        help="Rank of covariance matrix (used during posterior predictive inference)",
+    )
+    eval_parser.add_argument(
+        "--num_models",
+        type=int,
+        default=20,
+        help="Number of models in the SWAG ensemble",
+    )
+    eval_parser.add_argument(
+        "--input_dim",
+        type=int,
+        default=28 * 28,
+        help="Input dimension for the model",
+    )
+    eval_parser.add_argument(
+        "--hidden_dim",
+        type=int,
+        default=256,
+        help="Hidden dimension for the model",
+    )
+    eval_parser.add_argument(
+        "--num_hidden_layers",
+        type=int,
+        default=2,
+        help="Number of hidden layers in the model",
+    )
+    eval_parser.add_argument(
+        "--output_dim",
+        type=int,
+        default=10,
+        help="Output dimension for the model",
+    )
+    eval_parser.add_argument(
+        "--pretrain_epochs", type=int, default=30, help="Number of epochs for training"
+    )
+    eval_parser.add_argument(
+        "--swag_epochs",
+        type=int,
+        default=20,
+        help="Number of epochs for SWAG training",
+    )
+    eval_parser.add_argument(
+        "--eval_all_epochs",
+        type=bool,
+        default=True,
+        help="Evaluate all epochs",
+    )
+    eval_parser.add_argument(
+        "--val_size",
+        type=int,
+        default=10000,
+        help="Size of the validation set (default: 10000)",
+    )
+
+
+
 
 
 def build_parser():
@@ -100,6 +160,18 @@ def build_parser():
         type=str,
         default="./data",
         help="Directory where the MNIST dataset is stored",
+    )
+    parser.add_argument(
+        "--results_dir",
+        type=str,
+        default="./results",
+        help="Directory where model weights are saved, and where results will be stored",
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="cuda" if torch.cuda.is_available() else "cpu",
+        help="Device to use for training and evaluation",
     )
 
     parser.add_argument(
