@@ -75,7 +75,7 @@ def build_parser():
     parser.add_argument(
         "--optimizer",
         type=str,
-        default="spectralnorm",
+        default="muon",
         choices=[
             "adam",
             "adamw",

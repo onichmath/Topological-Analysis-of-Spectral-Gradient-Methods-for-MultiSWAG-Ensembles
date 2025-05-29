@@ -1,11 +1,5 @@
 import torch
-from muon import (
-    SingleDeviceMuonWithAuxAdam,
-    SingleDeviceMuonWithAuxAdamSpectralNorm,
-    SingleDeviceMuonWithAuxAdam10p2,
-    Adam10p,
-    AdamWSpectralNorm,
-)
+from muon import UnifiedOptimizer
 
 
 def split_params(params):
@@ -15,20 +9,39 @@ def split_params(params):
     return hidden_weights, others
 
 
-def muon_param_group_factory(optim_cls, use_muon_for_hidden=True):
+def unified_optimizer_factory(method="ns", top_percent=1.0):
     def factory(lr):
         def mk_optim(params):
             hidden_weights, others = split_params(params)
-            param_groups = [
-                dict(
-                    params=hidden_weights,
-                    use_muon=use_muon_for_hidden,
-                    lr=lr,
-                    weight_decay=lr / 1e3,
-                ),
-                dict(params=others, use_muon=False, lr=lr, weight_decay=lr / 1e3),
-            ]
-            return optim_cls(param_groups)
+            param_groups = []
+
+            if hidden_weights:
+                param_groups.append(
+                    dict(
+                        params=hidden_weights,
+                        use_muon=True,
+                        lr=lr,
+                        weight_decay=lr / 1e3,
+                        momentum=0.95,
+                        ns_steps=5,
+                        method=method,
+                        top_percent=top_percent,
+                    )
+                )
+
+            if others:
+                param_groups.append(
+                    dict(
+                        params=others,
+                        use_muon=False,
+                        lr=lr,
+                        weight_decay=lr / 1e3,
+                        betas=(0.9, 0.95),
+                        eps=1e-10,
+                    )
+                )
+
+            return UnifiedOptimizer(param_groups)
 
         return mk_optim
 
@@ -48,13 +61,11 @@ def adam_factory(optim_cls):
 OPTIMIZER_FACTORIES = {
     "adam": adam_factory(torch.optim.Adam),
     "adamw": adam_factory(torch.optim.AdamW),
-    "muon": muon_param_group_factory(SingleDeviceMuonWithAuxAdam),
-    "muonspectralnorm": muon_param_group_factory(
-        SingleDeviceMuonWithAuxAdamSpectralNorm
-    ),
-    "muon10p": muon_param_group_factory(SingleDeviceMuonWithAuxAdam10p2),
-    "10p": muon_param_group_factory(Adam10p),
-    "spectralnorm": muon_param_group_factory(AdamWSpectralNorm),
+    "muon": unified_optimizer_factory(method="ns", top_percent=1.0),
+    "muonspectralnorm": unified_optimizer_factory(method="ns", top_percent=0.0),
+    "muon10p": unified_optimizer_factory(method="ns", top_percent=0.1),
+    "10p": unified_optimizer_factory(method="svd", top_percent=0.1),
+    "spectralnorm": unified_optimizer_factory(method="svd", top_percent=0.0),
 }
 
 
