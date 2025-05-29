@@ -132,14 +132,14 @@ def evaluate_all_epochs(args):
     os.makedirs(f"results/{args.optimizer}/evaluation_results", exist_ok=True)
     
     # Evaluate pretrain epochs
-    # print("Evaluating pretrain epochs...")
-    # for epoch in tqdm(range(args.pretrain_epochs + 1)):  # +1 to include epoch 0
-    #     _evaluate_pretrain_epoch(
-    #         epoch, args.optimizer, model_args, test_dataloader, test_corrupt_dataloader,
-    #         train_dataloader, eval_params, args.num_models
-    #     )
-    #     # Clear memory after each epoch
-    #     _clear_gpu_memory()
+    print("Evaluating pretrain epochs...")
+    for epoch in tqdm(range(args.pretrain_epochs + 1)):  # +1 to include epoch 0
+        _evaluate_pretrain_epoch(
+            epoch, args.optimizer, model_args, test_dataloader, test_corrupt_dataloader,
+            train_dataloader, eval_params, args.num_models
+        )
+        # Clear memory after each epoch
+        _clear_gpu_memory()
     
     # Evaluate SWAG epochs  
     print("Evaluating SWAG epochs...")
