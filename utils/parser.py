@@ -75,8 +75,16 @@ def build_parser():
     parser.add_argument(
         "--optimizer",
         type=str,
-        default="muonspectralnorm",
-        choices=["adam", "adamw", "muon", "10p", "muon10p", "muonspectralnorm"],
+        default="spectralnorm",
+        choices=[
+            "adam",
+            "adamw",
+            "muon",
+            "10p",
+            "muon10p",
+            "muonspectralnorm",
+            "spectralnorm",
+        ],
         help="Optimizer to use for training (default: adam)",
     )
     return parser

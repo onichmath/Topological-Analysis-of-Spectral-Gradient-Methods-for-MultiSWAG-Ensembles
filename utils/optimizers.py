@@ -4,169 +4,63 @@ from muon import (
     SingleDeviceMuonWithAuxAdamSpectralNorm,
     SingleDeviceMuonWithAuxAdam10p2,
     Adam10p,
+    AdamWSpectralNorm,
 )
 
 
+def split_params(params):
+    param_list = list(params)
+    hidden_weights = [p for p in param_list if p.ndim >= 2]
+    others = [p for p in param_list if p.ndim < 2]
+    return hidden_weights, others
+
+
+def muon_param_group_factory(optim_cls, use_muon_for_hidden=True):
+    def factory(lr):
+        def mk_optim(params):
+            hidden_weights, others = split_params(params)
+            param_groups = [
+                dict(
+                    params=hidden_weights,
+                    use_muon=use_muon_for_hidden,
+                    lr=lr,
+                    weight_decay=lr / 1e3,
+                ),
+                dict(params=others, use_muon=False, lr=lr, weight_decay=lr / 1e3),
+            ]
+            return optim_cls(param_groups)
+
+        return mk_optim
+
+    return factory
+
+
+def adam_factory(optim_cls):
+    def factory(lr):
+        def mk_optim(params):
+            return optim_cls(params, lr=lr, weight_decay=lr / 1e3)
+
+        return mk_optim
+
+    return factory
+
+
+OPTIMIZER_FACTORIES = {
+    "adam": adam_factory(torch.optim.Adam),
+    "adamw": adam_factory(torch.optim.AdamW),
+    "muon": muon_param_group_factory(SingleDeviceMuonWithAuxAdam),
+    "muonspectralnorm": muon_param_group_factory(
+        SingleDeviceMuonWithAuxAdamSpectralNorm
+    ),
+    "muon10p": muon_param_group_factory(SingleDeviceMuonWithAuxAdam10p2),
+    "10p": muon_param_group_factory(Adam10p),
+    "spectralnorm": muon_param_group_factory(AdamWSpectralNorm),
+}
+
+
 def map_create_optimizer(optimizer_name):
-    if optimizer_name == "adam":
-        return create_adam_optimizer
-    elif optimizer_name == "muon":
-        return create_muon_optimizer
-    elif optimizer_name == "10p":
-        return create_10p_optimizer
-    elif optimizer_name == "muon10p":
-        return create_muon_10p_optimizer
-    elif optimizer_name == "muonspectralnorm":
-        return create_muon_spectralnorm_optimizer
-    elif optimizer_name == "adamw":
-        return create_adamw_optimizer
-    else:
+    try:
+        print(f"Using optimizer: {optimizer_name}")
+        return OPTIMIZER_FACTORIES[optimizer_name]
+    except KeyError:
         raise ValueError(f"Unknown optimizer: {optimizer_name}")
-
-
-def create_muon_spectralnorm_optimizer(lr):
-    """
-    Returns a function mk_optim(model) that creates a MuonWithAuxAdam optimizer
-    with the correct parameter groups.
-    """
-
-    def mk_optim(params):
-        """
-        Returns MuonWithAuxAdam optimizer with the specified learning rate.
-        """
-        param_list = list(params)
-        hidden_weights = [p for p in param_list if p.ndim >= 2]
-        others = [p for p in param_list if p.ndim < 2]
-
-        param_groups = [
-            dict(params=hidden_weights, use_muon=True, lr=lr, weight_decay=lr / 1e3),
-            dict(params=others, use_muon=False, lr=lr, weight_decay=lr / 1e3),
-        ]
-
-        return SingleDeviceMuonWithAuxAdamSpectralNorm(param_groups)
-
-    return mk_optim
-
-
-def create_muon_10p_optimizer(lr):
-    """
-    Returns a function mk_optim(model) that creates a MuonWithAuxAdam10p optimizer
-    with the correct parameter groups.
-    """
-
-    def mk_optim(params):
-        """
-        Returns MuonWithAuxAdam10p optimizer with the specified learning rate.
-        """
-        param_list = list(params)
-        hidden_weights = [p for p in param_list if p.ndim >= 2]
-        others = [p for p in param_list if p.ndim < 2]
-
-        param_groups = [
-            dict(params=hidden_weights, use_muon=True, lr=lr, weight_decay=lr / 1e3),
-            dict(params=others, use_muon=False, lr=lr, weight_decay=lr / 1e3),
-        ]
-
-        return SingleDeviceMuonWithAuxAdam10p2(param_groups)
-
-    return mk_optim
-
-
-def create_10p_optimizer(lr):
-    """
-    Returns a function mk_optim(model) that creates a MuonWithAuxAdam10p optimizer
-    with the correct parameter groups.
-    """
-
-    def mk_optim(params):
-        """
-        Returns MuonWithAuxAdam10p optimizer with the specified learning rate.
-        """
-        param_list = list(params)
-        hidden_weights = [p for p in param_list if p.ndim >= 2]
-        others = [p for p in param_list if p.ndim < 2]
-
-        param_groups = [
-            dict(params=hidden_weights, use_muon=True, lr=lr, weight_decay=lr / 1e3),
-            dict(params=others, use_muon=False, lr=lr, weight_decay=lr / 1e3),
-        ]
-
-        return Adam10p(param_groups)
-
-    return mk_optim
-
-
-def create_muon_optimizer(lr):
-    """
-    Returns a function mk_optim(model) that creates a MuonWithAuxAdam optimizer
-    with the correct parameter groups.
-    """
-
-    def mk_optim(params):
-        """
-        Returns MuonWithAuxAdam optimizer with the specified learning rate.
-        """
-        param_list = list(params)
-        hidden_weights = [p for p in param_list if p.ndim >= 2]
-        others = [p for p in param_list if p.ndim < 2]
-
-        param_groups = [
-            dict(params=hidden_weights, use_muon=True, lr=lr, weight_decay=lr / 1e3),
-            dict(params=others, use_muon=False, lr=lr, weight_decay=lr / 1e3),
-        ]
-
-        return SingleDeviceMuonWithAuxAdam(param_groups)
-
-    return mk_optim
-
-
-def create_adam_optimizer(lr):
-    """
-    Create a function that returns Adam optimizer with a specific learning rate.
-
-    Args:
-        lr (float): Learning rate for the optimizer.
-
-    Returns:
-        function: Function that generates Adam optimizer with the specified learning rate.
-    """
-
-    def mk_optim(params):
-        """
-        Returns Adam optimizer with the specified learning rate.
-
-        Args:
-            params: Model parameters.
-
-        Returns:
-            torch.optim.Adam: Adam optimizer.
-        """
-        return torch.optim.Adam(params, lr=lr, weight_decay=lr / 1e3)
-
-    return mk_optim
-
-
-def create_adamw_optimizer(lr):
-    """
-    Create a function that returns AdamW optimizer with a specific learning rate.
-
-    Args:
-        lr (float): Learning rate for the optimizer.
-
-    Returns:
-        function: Function that generates AdamW optimizer with the specified learning rate.
-    """
-
-    def mk_optim(params):
-        """
-        Returns AdamW optimizer with the specified learning rate.
-
-        Args:
-            params: Model parameters.
-
-        Returns:
-            torch.optim.AdamW: AdamW optimizer.
-        """
-        return torch.optim.AdamW(params, lr=lr, weight_decay=lr / 1e3)
-
-    return mk_optim
