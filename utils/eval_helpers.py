@@ -6,10 +6,13 @@ import os
 import gc
 from tqdm import tqdm
 from models.MLP import MLP
+import numpy as np
 
 from utils.dataloaders import build_test_dataloaders, build_train_dataloaders
 from utils.transforms import get_corrupt_transform, get_transform
 
+# TODO: SWAG loss 
+# TODO: Spectral norm everything, fix filenames
 
 def evaluate_predictions(preds: dict, dataloader: DataLoader, label=""):
     if isinstance(dataloader.dataset, torch.utils.data.Subset):
@@ -255,16 +258,7 @@ def _run_pretrain_eval_simple_ensemble(optimizer, epoch, model_args, dataloader,
     
     if len(models) == 0:
         print(f"No valid models found for epoch {epoch}")
-        # Return dummy predictions
-        dummy_preds = {}
-        for mode in eval_params['mode']:
-            if mode == "logits":
-                dummy_preds[mode] = torch.zeros(50000, 10)
-            elif mode in ["mean", "mode"]:
-                dummy_preds[mode] = torch.zeros(50000, dtype=torch.long)
-            else:
-                dummy_preds[mode] = torch.zeros(50000, 10)
-        return dummy_preds
+        return None
     
     print(f"Debug: Loaded {len(models)} models for ensemble evaluation")
     
@@ -332,13 +326,8 @@ def _run_pretrain_eval_simple_ensemble(optimizer, epoch, model_args, dataloader,
         if mode in all_preds and len(all_preds[mode]) > 0:
             final_preds[mode] = torch.cat(all_preds[mode], dim=0)
         else:
-            # Create dummy predictions if no valid predictions were obtained
-            if mode == "logits":
-                final_preds[mode] = torch.zeros(50000, 10)
-            elif mode in ["mean", "mode"]:
-                final_preds[mode] = torch.zeros(50000, dtype=torch.long)
-            else:
-                final_preds[mode] = torch.zeros(50000, 10)
+            print(f"Warning: No valid predictions for mode {mode}")
+            return None
     
     # Cleanup models
     del models
@@ -369,9 +358,16 @@ def _evaluate_pretrain_epoch(epoch, optimizer, model_args, test_dataloader, test
             optimizer, epoch, model_args, test_corrupt_dataloader, eval_params, num_models
         )
         
-        # Save predictions
-        _save_predictions(test_preds, optimizer, epoch, "pretrain", "test")
-        _save_predictions(test_corrupt_preds, optimizer, epoch, "pretrain", "test_corrupt")
+        # Save predictions only if they exist
+        if test_preds is not None:
+            _save_predictions(test_preds, optimizer, epoch, "pretrain", "test")
+        else:
+            print(f"Warning: No test predictions for pretrain epoch {epoch}")
+            
+        if test_corrupt_preds is not None:
+            _save_predictions(test_corrupt_preds, optimizer, epoch, "pretrain", "test_corrupt")
+        else:
+            print(f"Warning: No test_corrupt predictions for pretrain epoch {epoch}")
         
         print(f"Debug: Successfully evaluated pretrain epoch {epoch}, loss: {train_loss:.6f}")
         
@@ -763,16 +759,7 @@ def _run_swag_eval_simple(optimizer, epoch, model_args, dataloader, eval_params,
         
         if len(models) == 0:
             print(f"No valid SWAG models found for epoch {epoch}")
-            # Return dummy predictions
-            dummy_preds = {}
-            for mode in eval_params['mode']:
-                if mode == "logits":
-                    dummy_preds[mode] = torch.zeros(50000, 10)
-                elif mode in ["mean", "mode"]:
-                    dummy_preds[mode] = torch.zeros(50000, dtype=torch.long)
-                else:
-                    dummy_preds[mode] = torch.zeros(50000, 10)
-            return dummy_preds
+            return None
         
         print(f"Debug: Loaded {len(models)} SWAG mean weight models for evaluation")
         
@@ -840,13 +827,8 @@ def _run_swag_eval_simple(optimizer, epoch, model_args, dataloader, eval_params,
             if mode in all_preds and len(all_preds[mode]) > 0:
                 final_preds[mode] = torch.cat(all_preds[mode], dim=0)
             else:
-                # Create dummy predictions if no valid predictions were obtained
-                if mode == "logits":
-                    final_preds[mode] = torch.zeros(50000, 10)
-                elif mode in ["mean", "mode"]:
-                    final_preds[mode] = torch.zeros(50000, dtype=torch.long)
-                else:
-                    final_preds[mode] = torch.zeros(50000, 10)
+                print(f"Warning: No valid predictions for mode {mode}")
+                return None
         
         # Cleanup models
         del models
@@ -858,13 +840,15 @@ def _run_swag_eval_simple(optimizer, epoch, model_args, dataloader, eval_params,
         print(f"Error in simple SWAG evaluation: {e}")
         import traceback
         traceback.print_exc()
-        # Return dummy predictions
-        dummy_preds = {}
-        for mode in eval_params['mode']:
-            if mode == "logits":
-                dummy_preds[mode] = torch.zeros(50000, 10)
-            elif mode in ["mean", "mode"]:
-                dummy_preds[mode] = torch.zeros(50000, dtype=torch.long)
-            else:
-                dummy_preds[mode] = torch.zeros(50000, 10)
-        return dummy_preds
+        return None
+
+def _get_dataset_size(dataloader):
+    """Get the total number of samples in a dataloader."""
+    if hasattr(dataloader.dataset, '__len__'):
+        return len(dataloader.dataset)
+    else:
+        # Fallback: iterate through dataloader once to count
+        total_size = 0
+        for batch_data, _ in dataloader:
+            total_size += batch_data.size(0)
+        return total_size

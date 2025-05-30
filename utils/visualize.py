@@ -368,8 +368,8 @@ def plot_all_optimizers_accuracy_comparison(optimizers: List[str],
     plt.style.use('default')
     sns.set_palette("tab10")
     
-    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
-    fig.suptitle('Optimizer Comparison - Test Accuracies', fontsize=16, fontweight='bold')
+    fig, axes = plt.subplots(2, 2, figsize=(20, 12))
+    fig.suptitle('Optimizer Comparison - Test Accuracies (Pretrain vs SWAG)', fontsize=16, fontweight='bold')
     
     # Load data for all optimizers
     all_accuracy_data = {}
@@ -388,7 +388,7 @@ def plot_all_optimizers_accuracy_comparison(optimizers: List[str],
     _plot_multi_optimizer_accuracy(axes[1, 0], all_accuracy_data, 'test_corrupt', 'mean', 'Test Corrupt Mean Accuracy')
     _plot_multi_optimizer_accuracy(axes[1, 1], all_accuracy_data, 'test_corrupt', 'mode', 'Test Corrupt Mode Accuracy')
     
-    plt.tight_layout()
+    plt.tight_layout(rect=[0, 0, 0.85, 0.96])  # Leave space for legend
     
     if save_path is None:
         save_path = f"{results_dir}/optimizer_comparison_accuracies.png"
@@ -424,10 +424,12 @@ def _load_accuracy_data(optimizer: str, results_dir: str) -> Dict:
         if epoch is not None:
             try:
                 preds = torch.load(pred_file, map_location='cpu')
+                print(f"Loaded pretrain epoch {epoch} test predictions - shapes: {[f'{k}: {v.shape}' for k, v in preds.items() if torch.is_tensor(v)]}")
                 if 'mean' in preds and 'mode' in preds:
                     mean_acc = _compute_accuracy(preds['mean'], test_targets)
                     mode_acc = _compute_accuracy(preds['mode'], test_targets)
                     data['pretrain']['test'][epoch] = {'mean': mean_acc, 'mode': mode_acc}
+                    print(f"Pretrain epoch {epoch} test - Mean: {mean_acc:.4f}, Mode: {mode_acc:.4f}")
             except Exception as e:
                 print(f"Error loading {pred_file}: {e}")
     
@@ -440,6 +442,7 @@ def _load_accuracy_data(optimizer: str, results_dir: str) -> Dict:
                     mean_acc = _compute_accuracy(preds['mean'], test_corrupt_targets)
                     mode_acc = _compute_accuracy(preds['mode'], test_corrupt_targets)
                     data['pretrain']['test_corrupt'][epoch] = {'mean': mean_acc, 'mode': mode_acc}
+                    print(f"Pretrain epoch {epoch} test_corrupt - Mean: {mean_acc:.4f}, Mode: {mode_acc:.4f}")
             except Exception as e:
                 print(f"Error loading {pred_file}: {e}")
     
@@ -449,10 +452,12 @@ def _load_accuracy_data(optimizer: str, results_dir: str) -> Dict:
         if epoch is not None:
             try:
                 preds = torch.load(pred_file, map_location='cpu')
+                print(f"Loaded SWAG epoch {epoch} test predictions - shapes: {[f'{k}: {v.shape}' for k, v in preds.items() if torch.is_tensor(v)]}")
                 if 'mean' in preds and 'mode' in preds:
                     mean_acc = _compute_accuracy(preds['mean'], test_targets)
                     mode_acc = _compute_accuracy(preds['mode'], test_targets)
                     data['swag']['test'][epoch] = {'mean': mean_acc, 'mode': mode_acc}
+                    print(f"SWAG epoch {epoch} test - Mean: {mean_acc:.4f}, Mode: {mode_acc:.4f}")
             except Exception as e:
                 print(f"Error loading {pred_file}: {e}")
     
@@ -465,6 +470,7 @@ def _load_accuracy_data(optimizer: str, results_dir: str) -> Dict:
                     mean_acc = _compute_accuracy(preds['mean'], test_corrupt_targets)
                     mode_acc = _compute_accuracy(preds['mode'], test_corrupt_targets)
                     data['swag']['test_corrupt'][epoch] = {'mean': mean_acc, 'mode': mode_acc}
+                    print(f"SWAG epoch {epoch} test_corrupt - Mean: {mean_acc:.4f}, Mode: {mode_acc:.4f}")
             except Exception as e:
                 print(f"Error loading {pred_file}: {e}")
     
@@ -475,10 +481,19 @@ def _load_test_targets():
     """Load test dataset targets - this is a placeholder, you may need to adjust based on your data loading."""
     # This should load the actual test targets from your dataset
     # For now, returning None - you'll need to implement based on your dataloader structure
-    from utils.dataloaders import build_test_dataloaders
-    from utils.transforms import get_transform, get_corrupt_transform
-    
     try:
+        # Try different import paths depending on how script is run
+        try:
+            from utils.dataloaders import build_test_dataloaders
+            from utils.transforms import get_transform, get_corrupt_transform
+        except ImportError:
+            # If running from utils directory, try relative import
+            import sys
+            import os
+            sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            from utils.dataloaders import build_test_dataloaders
+            from utils.transforms import get_transform, get_corrupt_transform
+        
         test_dataloader, _ = build_test_dataloaders(
             "data/MNIST",  # Adjust path as needed
             batch_size=256,
@@ -489,18 +504,29 @@ def _load_test_targets():
         targets = []
         for _, target in test_dataloader:
             targets.append(target)
-        return torch.cat(targets, dim=0)
-    except:
-        print("Warning: Could not load test targets automatically")
+        targets = torch.cat(targets, dim=0)
+        print(f"Loaded test targets: {len(targets)} samples")
+        return targets
+    except Exception as e:
+        print(f"Warning: Could not load test targets automatically: {e}")
         return None
 
 
 def _load_test_corrupt_targets():
     """Load test corrupt dataset targets."""
-    from utils.dataloaders import build_test_dataloaders
-    from utils.transforms import get_transform, get_corrupt_transform
-    
     try:
+        # Try different import paths depending on how script is run
+        try:
+            from utils.dataloaders import build_test_dataloaders
+            from utils.transforms import get_transform, get_corrupt_transform
+        except ImportError:
+            # If running from utils directory, try relative import
+            import sys
+            import os
+            sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            from utils.dataloaders import build_test_dataloaders
+            from utils.transforms import get_transform, get_corrupt_transform
+        
         _, test_corrupt_dataloader = build_test_dataloaders(
             "data/MNIST",  # Adjust path as needed
             batch_size=256,
@@ -511,9 +537,11 @@ def _load_test_corrupt_targets():
         targets = []
         for _, target in test_corrupt_dataloader:
             targets.append(target)
-        return torch.cat(targets, dim=0)
-    except:
-        print("Warning: Could not load test corrupt targets automatically")
+        targets = torch.cat(targets, dim=0)
+        print(f"Loaded test corrupt targets: {len(targets)} samples")
+        return targets
+    except Exception as e:
+        print(f"Warning: Could not load test corrupt targets automatically: {e}")
         return None
 
 
@@ -529,9 +557,17 @@ def _compute_accuracy(predictions, targets):
     if targets is None:
         return 0.0
     
-    if len(predictions) != len(targets):
-        print(f"Warning: Prediction length {len(predictions)} != target length {len(targets)}")
-        return 0.0
+    # Handle size mismatch by taking the minimum size
+    pred_len = len(predictions)
+    target_len = len(targets)
+    
+    if pred_len != target_len:
+        print(f"Warning: Prediction length {pred_len} != target length {target_len}")
+        # Take the minimum to avoid index errors
+        min_len = min(pred_len, target_len)
+        predictions = predictions[:min_len]
+        targets = targets[:min_len]
+        print(f"Using first {min_len} samples for accuracy computation")
     
     # Convert targets to class indices if needed
     if targets.dim() == 2:
@@ -549,6 +585,8 @@ def _plot_test_dataset_accuracies(ax, accuracy_data: Dict, dataset: str, title: 
     pretrain_data = accuracy_data['pretrain'][dataset]
     swag_data = accuracy_data['swag'][dataset]
     
+    has_data = False
+    
     # Plot pretrain accuracies
     if pretrain_data:
         epochs = sorted(pretrain_data.keys())
@@ -557,6 +595,7 @@ def _plot_test_dataset_accuracies(ax, accuracy_data: Dict, dataset: str, title: 
         
         ax.plot(epochs, mean_accs, 'o-', label='Pretrain Mean', linewidth=2, markersize=4, alpha=0.8)
         ax.plot(epochs, mode_accs, 's-', label='Pretrain Mode', linewidth=2, markersize=4, alpha=0.8)
+        has_data = True
     
     # Plot SWAG accuracies
     if swag_data:
@@ -566,11 +605,17 @@ def _plot_test_dataset_accuracies(ax, accuracy_data: Dict, dataset: str, title: 
         
         ax.plot(epochs, mean_accs, '^-', label='SWAG Mean', linewidth=2, markersize=4, alpha=0.8)
         ax.plot(epochs, mode_accs, 'v-', label='SWAG Mode', linewidth=2, markersize=4, alpha=0.8)
+        has_data = True
     
     ax.set_xlabel('Epoch')
     ax.set_ylabel('Accuracy')
     ax.set_title(title)
-    ax.legend()
+    
+    if has_data:
+        ax.legend()
+    else:
+        ax.text(0.5, 0.5, 'No Data Available', ha='center', va='center', transform=ax.transAxes)
+    
     ax.grid(True, alpha=0.3)
     ax.set_ylim(0, 1)
 
@@ -580,6 +625,8 @@ def _plot_accuracy_comparison(ax, accuracy_data: Dict, acc_type: str, title: str
     datasets = ['test', 'test_corrupt']
     colors = ['blue', 'red']
     
+    has_data = False
+    
     for dataset, color in zip(datasets, colors):
         # Pretrain data
         pretrain_data = accuracy_data['pretrain'][dataset]
@@ -588,6 +635,7 @@ def _plot_accuracy_comparison(ax, accuracy_data: Dict, acc_type: str, title: str
             accs = [pretrain_data[ep][acc_type] for ep in epochs]
             ax.plot(epochs, accs, 'o-', color=color, alpha=0.7, 
                    label=f'Pretrain {dataset.replace("_", " ").title()}', linewidth=2, markersize=4)
+            has_data = True
         
         # SWAG data
         swag_data = accuracy_data['swag'][dataset]
@@ -596,29 +644,145 @@ def _plot_accuracy_comparison(ax, accuracy_data: Dict, acc_type: str, title: str
             accs = [swag_data[ep][acc_type] for ep in epochs]
             ax.plot(epochs, accs, 's-', color=color, alpha=0.9, 
                    label=f'SWAG {dataset.replace("_", " ").title()}', linewidth=2, markersize=4)
+            has_data = True
     
     ax.set_xlabel('Epoch')
     ax.set_ylabel('Accuracy')
     ax.set_title(title)
-    ax.legend()
+    
+    if has_data:
+        ax.legend()
+    else:
+        ax.text(0.5, 0.5, 'No Data Available', ha='center', va='center', transform=ax.transAxes)
+    
     ax.grid(True, alpha=0.3)
     ax.set_ylim(0, 1)
 
 
 def _plot_multi_optimizer_accuracy(ax, all_accuracy_data: Dict, dataset: str, acc_type: str, title: str):
-    """Plot accuracy comparison across optimizers."""
+    """Plot accuracy comparison across optimizers for both pretrain and SWAG."""
+    has_data = False
+    
     for opt_name, accuracy_data in all_accuracy_data.items():
-        # Plot SWAG data (more interesting than pretrain)
+        # Plot pretrain data
+        pretrain_data = accuracy_data['pretrain'][dataset]
+        if pretrain_data:
+            epochs = sorted(pretrain_data.keys())
+            accs = [pretrain_data[ep][acc_type] for ep in epochs]
+            ax.plot(epochs, accs, 'o-', label=f'{opt_name} (Pretrain)', 
+                   linewidth=2, markersize=4, alpha=0.6, linestyle='--')
+            has_data = True
+        
+        # Plot SWAG data
         swag_data = accuracy_data['swag'][dataset]
         if swag_data:
             epochs = sorted(swag_data.keys())
             accs = [swag_data[ep][acc_type] for ep in epochs]
-            ax.plot(epochs, accs, 'o-', label=opt_name, linewidth=2, markersize=4, alpha=0.8)
+            ax.plot(epochs, accs, 's-', label=f'{opt_name} (SWAG)', 
+                   linewidth=2, markersize=4, alpha=0.8)
+            has_data = True
     
     ax.set_xlabel('Epoch')
     ax.set_ylabel('Accuracy')
     ax.set_title(title)
-    ax.legend()
+    
+    if has_data:
+        # Adjust legend to handle potentially many entries
+        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    else:
+        ax.text(0.5, 0.5, 'No Data Available', ha='center', va='center', transform=ax.transAxes)
+    
+    ax.grid(True, alpha=0.3)
+    ax.set_ylim(0, 1)
+
+
+def plot_comprehensive_accuracy_analysis(optimizer: str,
+                                       results_dir: str = "results",
+                                       save_path: Optional[str] = None,
+                                       show_plot: bool = True):
+    """
+    Create a comprehensive accuracy analysis with clearer separation of pretrain and SWAG phases.
+    
+    Args:
+        optimizer: Name of the optimizer (e.g., 'adam', 'muon')
+        results_dir: Base directory containing results
+        save_path: Path to save the plot (if None, uses default naming)
+        show_plot: Whether to display the plot
+    """
+    # Set up the plot style
+    plt.style.use('default')
+    sns.set_palette("husl")
+    
+    # Load accuracy data
+    accuracy_data = _load_accuracy_data(optimizer, results_dir)
+    
+    if not accuracy_data:
+        print(f"No accuracy data found for optimizer: {optimizer}")
+        return
+    
+    # Create figure with subplots
+    fig, axes = plt.subplots(3, 2, figsize=(16, 18))
+    fig.suptitle(f'Comprehensive Accuracy Analysis - {optimizer.upper()}', fontsize=16, fontweight='bold')
+    
+    # Row 1: Individual phase plots
+    _plot_phase_specific_accuracies(axes[0, 0], accuracy_data, 'pretrain', 'Pretrain Phase Accuracies')
+    _plot_phase_specific_accuracies(axes[0, 1], accuracy_data, 'swag', 'SWAG Phase Accuracies')
+    
+    # Row 2: Dataset-specific comparisons
+    _plot_test_dataset_accuracies(axes[1, 0], accuracy_data, 'test', 'Clean Test Dataset (Both Phases)')
+    _plot_test_dataset_accuracies(axes[1, 1], accuracy_data, 'test_corrupt', 'Corrupted Test Dataset (Both Phases)')
+    
+    # Row 3: Accuracy type comparisons
+    _plot_accuracy_comparison(axes[2, 0], accuracy_data, 'mean', 'Mean Accuracy Comparison')
+    _plot_accuracy_comparison(axes[2, 1], accuracy_data, 'mode', 'Mode Accuracy Comparison')
+    
+    plt.tight_layout()
+    
+    # Save plot
+    if save_path is None:
+        save_path = f"{results_dir}/{optimizer}/evaluation_results/comprehensive_accuracy_analysis.png"
+    
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    print(f"Comprehensive accuracy analysis saved to: {save_path}")
+    
+    if show_plot:
+        plt.show()
+    else:
+        plt.close()
+
+
+def _plot_phase_specific_accuracies(ax, accuracy_data: Dict, phase: str, title: str):
+    """Plot accuracies for a specific phase (pretrain or SWAG) across both datasets."""
+    phase_data = accuracy_data[phase]
+    
+    has_data = False
+    colors = ['blue', 'red']
+    datasets = ['test', 'test_corrupt']
+    
+    for dataset, color in zip(datasets, colors):
+        dataset_data = phase_data[dataset]
+        if dataset_data:
+            epochs = sorted(dataset_data.keys())
+            mean_accs = [dataset_data[ep]['mean'] for ep in epochs]
+            mode_accs = [dataset_data[ep]['mode'] for ep in epochs]
+            
+            label_prefix = dataset.replace('_', ' ').title()
+            ax.plot(epochs, mean_accs, 'o-', color=color, alpha=0.8,
+                   label=f'{label_prefix} Mean', linewidth=2, markersize=4)
+            ax.plot(epochs, mode_accs, 's-', color=color, alpha=0.6,
+                   label=f'{label_prefix} Mode', linewidth=2, markersize=4)
+            has_data = True
+    
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Accuracy')
+    ax.set_title(title)
+    
+    if has_data:
+        ax.legend()
+    else:
+        ax.text(0.5, 0.5, 'No Data Available', ha='center', va='center', transform=ax.transAxes)
+    
     ax.grid(True, alpha=0.3)
     ax.set_ylim(0, 1)
 
@@ -627,19 +791,27 @@ if __name__ == "__main__":
     # Example usage
     optimizer = "adam"
     
-    # # Plot single optimizer
+    # # Plot single optimizer losses
+    # print("Generating loss visualizations...")
     # plot_training_losses(optimizer, show_plot=False)
     
-    # # Generate summary table
-    # summary = generate_loss_summary_table(optimizer)
-    # print(summary)
+    # # Plot single optimizer accuracies (original format)
+    # print("Generating accuracy visualizations...")
+    # plot_test_accuracies(optimizer, show_plot=False)
     
-    # Compare multiple optimizers losses
+    # Plot comprehensive accuracy analysis (new format)
+    print("Generating comprehensive accuracy analysis...")
+    plot_comprehensive_accuracy_analysis(optimizer, show_plot=False)
+    
+    # Generate summary table
+    print("Generating loss summary...")
+    summary = generate_loss_summary_table(optimizer)
+    print(summary)
+    
+    # Compare multiple optimizers
     optimizers = ["adam", "muon", "adamw", "10p", "muon10p", "muonspectralnorm", "spectralnorm"]
+    print("Generating multi-optimizer comparisons...")
     plot_all_optimizers_comparison(optimizers, show_plot=False)
-    
-    # Plot single optimizer test accuracies
-    plot_test_accuracies(optimizer, show_plot=False)
-    
-    # Compare multiple optimizers accuracies
     plot_all_optimizers_accuracy_comparison(optimizers, show_plot=False)
+    
+    print("All visualizations complete!")
