@@ -17,13 +17,13 @@ def train(args):
     - random_seed=False: Same initialization across particles
     - bootstrap=True: Different data samples per particle  
     - save_metrics=True: Comprehensive metric saving for TDA analysis
-    - Enhanced with gradient/trajectory tracking
+    - Enhanced with gradient norm tracking (L2/spectral norm statistics only, memory efficient)
     """
     
     print(f"Training {args.optimizer} with bootstrap ensemble configuration")
-    print(f"Comprehensive tracking enabled for TDA analysis")
+    print(f"Comprehensive tracking enabled for TDA analysis (norm-only gradient tracking)")
     
-    # Set up tracking utilities
+    # Set up tracking utilities (gradient norm tracking, weight distances, loss landscapes)
     tracking_utils = setup_comprehensive_tracking(args.optimizer)
     
     train_dataloader, val_dataloader, val_corrupt_dataloader = build_train_dataloaders(

@@ -1,5 +1,6 @@
 from utils.parser import build_parser
 from utils.train_helpers import train
+from utils.eval_helpers import evaluate_all_epochs
 
 # TODO: function space filtration on test + test corrupt
 # TODO: train set evaluation for epistemic uncertainty + test set for aleatoric uncertainty
@@ -16,13 +17,11 @@ def main():
     # TODO: evaluate on test set for aleatoric uncertainty
     # Note: p_params is list of [tensor(num_models, model_params, layer)]
     args = build_parser().parse_args()
-    DATA_DIR = "./data"
-    RESULTS_DIR = "./results"
 
     if args.mode == "train":
         train(args)
     if args.mode == "eval":
-        pass
+        evaluate_all_epochs(args)
     if args.mode == "analysis":
         pass
 

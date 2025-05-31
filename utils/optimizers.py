@@ -23,7 +23,7 @@ def unified_optimizer_factory(method="ns", top_percent=1.0):
                         lr=lr,
                         weight_decay=lr / 1e3,
                         momentum=0.95,
-                        ns_steps=5,
+                        ns_steps=10,
                         method=method,
                         top_percent=top_percent,
                     )
