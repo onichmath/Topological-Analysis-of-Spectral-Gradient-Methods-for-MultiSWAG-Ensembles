@@ -58,14 +58,49 @@ def adam_factory(optim_cls):
     return factory
 
 
+def adam_svd_factory(top_percent=0.1):
+    """Factory for AdamW optimizer with SVD filtering post-processing."""
+    def factory(lr):
+        def mk_optim(params):
+            from muon import orthogonalize
+            
+            class AdamWSVD(torch.optim.AdamW):
+                def __init__(self, params, lr, top_percent, **kwargs):
+                    super().__init__(params, lr=lr, **kwargs)
+                    self.top_percent = top_percent
+                
+                @torch.no_grad()
+                def step(self, closure=None):
+                    # First do standard AdamW step
+                    loss = super().step(closure)
+                    
+                    # Then apply SVD filtering to gradients for next step
+                    for group in self.param_groups:
+                        for p in group['params']:
+                            if p.grad is not None and p.grad.ndim >= 2:
+                                # Apply SVD filtering to gradient
+                                p.grad.data = orthogonalize(
+                                    p.grad.data, 
+                                    method="svd", 
+                                    top_percent=self.top_percent
+                                )
+                    
+                    return loss
+            
+            return AdamWSVD(params, lr=lr, top_percent=top_percent, weight_decay=lr / 1e3)
+        
+        return mk_optim
+    return factory
+
+
 OPTIMIZER_FACTORIES = {
     "adam": adam_factory(torch.optim.Adam),
     "adamw": adam_factory(torch.optim.AdamW),
     "muon": unified_optimizer_factory(method="ns", top_percent=1.0),
     "muonspectralnorm": unified_optimizer_factory(method="ns", top_percent=0.0),
     "muon10p": unified_optimizer_factory(method="ns", top_percent=0.1),
-    "10p": unified_optimizer_factory(method="svd", top_percent=0.1),
-    "spectralnorm": unified_optimizer_factory(method="svd", top_percent=0.0),
+    "10p": adam_svd_factory(top_percent=0.1),
+    "spectralnorm": adam_svd_factory(top_percent=0.0),
 }
 
 

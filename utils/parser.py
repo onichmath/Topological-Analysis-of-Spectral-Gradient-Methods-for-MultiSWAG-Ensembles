@@ -1,12 +1,13 @@
 import argparse
 import torch
 
+
 def add_train_subparser(subparsers):
     train_parser = subparsers.add_parser(
         "train", help="Train the MultiSWAG model on the MNIST dataset"
     )
     train_parser.add_argument(
-        "--batch_size", type=int, default=256, help="Batch size for DataLoader"
+        "--batch_size", type=int, default=128, help="Batch size for DataLoader"
     )
     train_parser.add_argument(
         "--lr", type=float, default=0.01, help="Learning rate for the optimizer"
@@ -140,9 +141,6 @@ def add_eval_subparser(subparsers):
         default=10000,
         help="Size of the validation set (default: 10000)",
     )
-
-
-
 
 
 def build_parser():
