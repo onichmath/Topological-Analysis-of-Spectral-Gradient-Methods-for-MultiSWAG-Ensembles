@@ -76,7 +76,7 @@ def add_eval_subparser(subparsers):
         "eval", help="Evaluate the MultiSWAG model on the MNIST dataset"
     )
     eval_parser.add_argument(
-        "--batch_size", type=int, default=256, help="Batch size for DataLoader"
+        "--batch_size", type=int, default=128, help="Batch size for DataLoader"
     )
     eval_parser.add_argument(
         "--num_samples",
@@ -142,7 +142,6 @@ def add_eval_subparser(subparsers):
         help="Size of the validation set (default: 10000)",
     )
 
-
 def build_parser():
     parser = argparse.ArgumentParser(description="MNIST DataLoader Example")
 
@@ -189,8 +188,12 @@ def build_parser():
             "muon",
             "10p",
             "muon10p",
+            "muon10p_fast",
             "muonspectralnorm",
+            "muonspectralnorm_fast",
             "spectralnorm",
+            "spectralnorm_fast",
+            "10p_fast",
         ],
         help="Optimizer to use for training (default: adam)",
     )

@@ -17,6 +17,8 @@ def main():
     # TODO: evaluate on test set for aleatoric uncertainty
     # Note: p_params is list of [tensor(num_models, model_params, layer)]
     args = build_parser().parse_args()
+    # Print args
+    print(args)
 
     if args.mode == "train":
         train(args)
