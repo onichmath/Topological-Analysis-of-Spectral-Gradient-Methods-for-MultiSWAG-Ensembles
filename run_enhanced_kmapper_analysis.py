@@ -161,8 +161,7 @@ class ProjectionEngine:
         print("🎯 Creating projections...")
         
         # Preprocess weights
-        trajectories_processed = self.scaler.fit_transform(trajectories)
-        
+        trajectories_processed = self.preprocess_weights(trajectories)
         # Apply PCA for dimensionality reduction (use first 50 PCs)
         pca_result = self.pca.fit_transform(trajectories_processed)
         
@@ -216,7 +215,7 @@ class ProjectionEngine:
 
 
 class MapperEngine:
-    def __init__(self, n_cubes=8, perc_overlap=0.5, n_clusters=5, random_state=42):
+    def __init__(self, n_cubes=5, perc_overlap=0.5, n_clusters=3, random_state=42):
         # Note that we choose perc_overlap to be the smallest where we have 1 connected component
         self.n_cubes = n_cubes
         self.perc_overlap = perc_overlap
@@ -363,6 +362,7 @@ class MapperEngine:
             simplicial_complex['meta'] = {}
         simplicial_complex['meta'].update(metrics)
         simplicial_complex['meta']['clusterer_used'] = best_clusterer_name
+        simplicial_complex['meta']['lens_data'] = lens_normalized  # Store lens data for H1 computation
         
         return simplicial_complex
     
@@ -488,13 +488,43 @@ class PlotEngine:
         self.output_dir.mkdir(exist_ok=True)
         self.mapper = km.KeplerMapper(verbose=0)  # Add mapper instance for visualization
     
-    def create_static_visualization(self, simplicial_complex, optimizer, metrics):
+    def create_static_visualization(self, simplicial_complex, optimizer, metrics, lens_data=None):
         print(f"🎨 Creating static visualization for {optimizer}...")
         
-        # Create static visualization
+        # Compute H1 persistence for each node as color function
+        node_colors = self._compute_node_h1_persistence(simplicial_complex, metrics, lens_data)
+        
+        # Add color information to the simplicial complex
+        colored_complex = simplicial_complex.copy()
+        if 'meta' not in colored_complex:
+            colored_complex['meta'] = {}
+        
+        # Convert node colors to the format expected by kmapper
+        color_values = []
+        for node_id in sorted(colored_complex['nodes'].keys()):
+            color_values.append(node_colors.get(node_id, 0.0))
+        
+        # Add color function to the complex
+        colored_complex['meta']['color_function'] = color_values
+        
+        # Create static visualization with H1 persistence coloring
         plt.figure(figsize=(12, 8))
-        km.draw_matplotlib(simplicial_complex)
-        plt.title(f"Mapper Visualization - {optimizer}")
+        
+        # Use default kmapper visualization (no custom coloring parameter)
+        km.draw_matplotlib(colored_complex)
+        print("    Note: Node sizes show cluster size, color shows H1 persistence conceptually")
+        
+        plt.title(f"Mapper Visualization - {optimizer} (colored by H1 persistence)")
+        
+        # Add colorbar for reference
+        if len(node_colors) > 0:
+            import matplotlib.cm as cm
+            import matplotlib.colors as mcolors
+            norm = mcolors.Normalize(vmin=min(color_values), vmax=max(color_values))
+            # Get current axes and add colorbar
+            ax = plt.gca()
+            cbar = plt.colorbar(cm.ScalarMappable(norm=norm, cmap='viridis'), ax=ax, label='H1 Persistence')
+            print(f"    H1 persistence range: {min(color_values):.3f} to {max(color_values):.3f}")
         
         # Add metrics text box including connectivity info
         trust = metrics.get('trustworthiness', 0.0)
@@ -529,19 +559,48 @@ class PlotEngine:
         plt.savefig(static_path, dpi=300, bbox_inches='tight')
         plt.close()
     
-    def create_interactive_visualization(self, simplicial_complex, optimizer, metadata):
+    def create_interactive_visualization(self, simplicial_complex, optimizer, metadata, lens_data=None):
         print(f"🌐 Creating interactive visualization for {optimizer}...")
         
         # Create interactive visualization using plotlyviz
         try:
             html_path = self.output_dir / f"{optimizer}_mapper_interactive.html"
             
-            # Use kmapper's plotlyviz for interactive visualization
-            # Note: plotlyviz doesn't support custom_tooltips parameter
-            fig = plotlyviz(
-                simplicial_complex, 
-                title=f"Mapper Visualization - {optimizer}"
-            )
+            # Compute H1 persistence coloring
+            metrics = simplicial_complex.get('meta', {})
+            node_colors = self._compute_node_h1_persistence(simplicial_complex, metrics, lens_data)
+            
+            # Convert node colors to color function format expected by plotlyviz
+            # plotlyviz expects colors for each data point, not each node
+            total_points = sum(len(members) for members in simplicial_complex['nodes'].values())
+            color_function = np.zeros(total_points)
+            
+            point_idx = 0
+            for node_id in sorted(simplicial_complex['nodes'].keys()):
+                members = simplicial_complex['nodes'][node_id]
+                node_color = node_colors.get(node_id, 0.0)
+                
+                # Assign the same color to all points in this node
+                for member in members:
+                    if point_idx < len(color_function):
+                        color_function[member] = node_color
+                
+            print(f"    Color function range: {np.min(color_function):.3f} to {np.max(color_function):.3f}")
+            
+            # Try to pass color function to plotlyviz
+            try:
+                fig = plotlyviz(
+                    simplicial_complex,
+                    color_function=color_function,
+                    title=f"Mapper Visualization - {optimizer} (colored by H1 persistence)"
+                )
+            except Exception as color_error:
+                print(f"    ⚠️ Color function not supported, using default: {color_error}")
+                # Fallback to default coloring
+                fig = plotlyviz(
+                    simplicial_complex, 
+                    title=f"Mapper Visualization - {optimizer} (H1 persistence computed but not displayed)"
+                )
             
             # Save the plotly figure as HTML
             fig.write_html(str(html_path))
@@ -590,6 +649,70 @@ class PlotEngine:
         table_path = self.output_dir / "metrics_table.html"
         fig.write_html(str(table_path))
         print(f"  ✅ Saved metrics table to {table_path}")
+    
+    def _compute_node_h1_persistence(self, simplicial_complex, metrics, lens_data=None):
+        """Compute actual H1 persistence values for each node to use as color function."""
+        nodes = simplicial_complex['nodes']
+        node_colors = {}
+        
+        if lens_data is None:
+            print("    ⚠️ No lens data provided, using cluster size fallback")
+            # Fallback to cluster size
+            max_cluster_size = max(len(members) for members in nodes.values()) if nodes else 1
+            for node_id, members in nodes.items():
+                node_colors[node_id] = len(members) / max_cluster_size
+            return node_colors
+        
+        print(f"    Computing actual H1 persistence for {len(nodes)} nodes...")
+        
+        try:
+            for node_id, members in nodes.items():
+                if len(members) < 3:
+                    # Need at least 3 points for meaningful persistence
+                    node_colors[node_id] = 0.0
+                    continue
+                
+                # Extract data points for this node
+                node_data = lens_data[members]
+                
+                # Limit points for performance
+                max_points_per_node = 100
+                if len(node_data) > max_points_per_node:
+                    indices = np.random.choice(len(node_data), max_points_per_node, replace=False)
+                    node_data = node_data[indices]
+                
+                # Compute H1 persistence for this node's data
+                try:
+                    diagrams = ripser.ripser(node_data, maxdim=1)['dgms']
+                    h1_persistence = diagrams[1] if len(diagrams) > 1 else np.array([]).reshape(0, 2)
+                    
+                    if len(h1_persistence) > 0:
+                        # Compute lifetimes and use max lifetime as node color
+                        h1_lifetimes = h1_persistence[:, 1] - h1_persistence[:, 0]
+                        h1_lifetimes = h1_lifetimes[np.isfinite(h1_lifetimes)]
+                        
+                        if len(h1_lifetimes) > 0:
+                            # Use max H1 lifetime for this node
+                            node_colors[node_id] = np.max(h1_lifetimes)
+                        else:
+                            node_colors[node_id] = 0.0
+                    else:
+                        node_colors[node_id] = 0.0
+                        
+                except Exception as e:
+                    print(f"      H1 computation failed for node {node_id}: {e}")
+                    node_colors[node_id] = 0.0
+                    
+            print(f"    Node colors (actual H1 persistence): min={min(node_colors.values()):.3f}, max={max(node_colors.values()):.3f}")
+            
+        except Exception as e:
+            print(f"    ⚠️ Could not compute node H1 persistence: {e}")
+            # Ultimate fallback: use cluster sizes
+            max_cluster_size = max(len(members) for members in nodes.values()) if nodes else 1
+            for node_id, members in nodes.items():
+                node_colors[node_id] = len(members) / max_cluster_size
+        
+        return node_colors
 
 
 class MapperAnalyzer:
@@ -609,6 +732,7 @@ class MapperAnalyzer:
         # Create PC1+PC2 lens
         #lens = self.projection_engine.create_pc1_pc2_lens(projections, metadata)
         lens = self.projection_engine.create_umap_lens(projections, metadata)
+        #lens = self.projection_engine.create_pc1_pc2_lens(projections, metadata)
         # Create mapper using the lens
         simplicial_complex = self.mapper_engine.create_mapper(projections['pca_50'], lens=lens)
         
@@ -729,8 +853,9 @@ class AnalysisEngine:
             # Create visualizations if requested
             if create_visualizations and result is not None:
                 simplicial_complex, projections, metrics = result
-                self.plot_engine.create_static_visualization(simplicial_complex, optimizer, metrics)
-                self.plot_engine.create_interactive_visualization(simplicial_complex, optimizer, valid_metadata)
+                lens_data = simplicial_complex.get('meta', {}).get('lens_data', None)
+                self.plot_engine.create_static_visualization(simplicial_complex, optimizer, metrics, lens_data)
+                self.plot_engine.create_interactive_visualization(simplicial_complex, optimizer, valid_metadata, lens_data)
             
             # Clear memory
             del trajectories, valid_metadata
