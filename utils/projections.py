@@ -35,7 +35,7 @@ warnings.filterwarnings('ignore')
 
 
 class DataLoader:
-    def __init__(self, max_trajectories=600, max_total=30000):
+    def __init__(self, max_trajectories=620, max_total=30000):
         self.max_trajectories = max_trajectories
         self.max_total = max_total
         print(f"DataLoader initialized with max_trajectories={max_trajectories} and max_total={max_total}")
@@ -194,7 +194,7 @@ class ProjectionEngine:
             print("Computing t-SNE projection...")
             perplexity = min(30, len(trajectories) // 4)
             tsne = TSNE(n_components=2, random_state=42, perplexity=perplexity)
-            tsne_input = trajectories_scaled[:, :50] if trajectories_scaled.shape[1] > 50 else trajectories_scaled
+            tsne_input = pca_result[:, :50] if pca_result.shape[1] > 50 else pca_result
             projections['tsne_2d'] = tsne.fit_transform(tsne_input)
         
         print(f"Created projections: {list(projections.keys())}")
@@ -293,8 +293,8 @@ def generate_projections_for_optimizer(optimizer, data_loader, projection_engine
     
     print(f" Loaded {len(trajectories)} trajectories")
     print(f"Trajectory shape: {trajectories.shape}")
-    print(f"Sample epochs: {sorted(set([m['epoch'] for m in metadata[:10]]))}")
-    print(f"Sample particles: {sorted(set([m['particle_id'] for m in metadata[:10]]))}")
+    print(f"Num epochs: {len(set([m['epoch'] for m in metadata]))}")
+    print(f"Num particles: {len(set([m['particle_id'] for m in metadata]))}")
     
     projections, pca = projection_engine.create_projections(trajectories, include_tsne=include_tsne)
     
@@ -330,7 +330,7 @@ def generate_optimizer_projections():
     include_tsne = True
     
     # Initialize engines
-    data_loader = DataLoader(max_trajectories=600, max_total=30000)
+    data_loader = DataLoader(max_trajectories=30000, max_total=30000)
     projection_engine = ProjectionEngine()
     
     all_results = {}
@@ -402,9 +402,8 @@ def test_projections():
 
 
 if __name__ == "__main__":
-    #results = generate_optimizer_projections()
+    results = generate_optimizer_projections()
     
-    test = True
-    # Optionally test loading
-    if test:
+
+    if results:
         test_projections() 
