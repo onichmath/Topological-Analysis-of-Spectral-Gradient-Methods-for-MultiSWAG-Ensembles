@@ -8,7 +8,8 @@ import gc
 import os
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
-from sklearn.manifold import TSNE, trustworthiness
+from sklearn.manifold import trustworthiness
+import ripser
 from sklearn.cluster import DBSCAN, KMeans, AgglomerativeClustering
 from sklearn.feature_selection import VarianceThreshold
 from sklearn.metrics import silhouette_score
@@ -21,14 +22,11 @@ import warnings
 from scipy.spatial.distance import pdist, squareform, cdist
 import pandas as pd
 import pickle
+from kmapper.plotlyviz import plotlyviz
+from umap import UMAP
 
-# Suppress warnings
 warnings.filterwarnings('ignore')
-
-# Set global random seed for reproducibility
 np.random.seed(42)
-
-# Set environment variables for better performance
 os.environ.update({
     'OPENBLAS_NUM_THREADS': '1',
     'OMP_NUM_THREADS': '1',
@@ -47,17 +45,14 @@ class DataLoader:
                 print(f"  File not found: {file_path}")
                 return None, None
             
-            # Memory-mapped loading for better IO
             with open(file_path, 'rb') as f:
                 state_dict = torch.load(file_path, map_location='cpu', mmap=True)
             
-            # Extract model parameters
             weight_vector = []
             for key, param in state_dict.items():
                 if isinstance(param, torch.Tensor):
                     weight_vector.extend(param.flatten().detach().cpu().numpy())
             
-            # Clear memory
             del state_dict
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
@@ -137,8 +132,8 @@ class DataLoader:
             else:
                 print(f"  Failed to load trajectory")
             
-            if (i + 1) % 10 == 0:
-                print(f"  Loaded {len(trajectories)}/{i + 1} trajectories")
+            if (i + 1) % 100 == 0:
+                print(f"  Loaded {len(trajectories)}/{len(metadata_list)} trajectories")
                 gc.collect()
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
@@ -148,25 +143,16 @@ class DataLoader:
 
 
 class ProjectionEngine:
-    def __init__(self, n_components=2, perplexity=30, n_iter=1000, random_state=42):
+    def __init__(self, n_components=50, random_state=42):
         self.n_components = n_components
-        self.perplexity = perplexity
-        self.n_iter = n_iter
         self.random_state = random_state
         self.scaler = StandardScaler()
         self.variance_threshold = VarianceThreshold(threshold=1e-6)  # Drop near-zero weights
-        self.pca = PCA(n_components=min(50, n_components), random_state=random_state)
-        self.tsne = TSNE(n_components=n_components, perplexity=perplexity, 
-                        n_iter=n_iter, random_state=random_state)
+        self.pca = PCA(n_components=n_components, random_state=random_state)
     
     def preprocess_weights(self, weights):
-        # Log-scale absolute values
         weights_log = np.sign(weights) * np.log1p(np.abs(weights))
-        
-        # Remove low-variance features
         weights_var = self.variance_threshold.fit_transform(weights_log)
-        
-        # Standardize
         weights_scaled = self.scaler.fit_transform(weights_var)
         
         return weights_scaled
@@ -175,62 +161,63 @@ class ProjectionEngine:
         print("🎯 Creating projections...")
         
         # Preprocess weights
-        trajectories_processed = self.preprocess_weights(trajectories)
+        trajectories_processed = self.scaler.fit_transform(trajectories)
         
-        # Apply PCA for dimensionality reduction
+        # Apply PCA for dimensionality reduction (use first 50 PCs)
         pca_result = self.pca.fit_transform(trajectories_processed)
         
-        # Apply t-SNE
-        tsne_result = self.tsne.fit_transform(pca_result)
+        # Use PCA result directly instead of UMAP
+        print(f"  Using first 50 PCA components: {pca_result.shape}")
         
-        return tsne_result, self.pca
+        # Return PCA results (no UMAP)
+        return {
+            'pca': pca_result,
+            'pca_50': pca_result  # Use PCA as the main embedding
+        }, self.pca
     
     @staticmethod
-    def create_lens_functions(projections, metadata):
-        print("🔍 Creating lens functions...")
-        lens_functions = {}
+    def create_pc1_pc2_lens(projections, metadata):
+        print("🔍 Creating PC1+PC2 lens function...")
         
-        if 'pca_2d' in projections:
-            # Standardize PC1 and PC2 separately
-            pc1 = projections['pca_2d'][:, 0]
-            pc2 = projections['pca_2d'][:, 1]
-            pc1_norm = (pc1 - np.mean(pc1)) / (np.std(pc1) + 1e-8)
-            pc2_norm = (pc2 - np.mean(pc2)) / (np.std(pc2) + 1e-8)
-            lens_functions['pc1_pc2'] = np.column_stack([pc1_norm, pc2_norm])
+        if 'pca' not in projections:
+            raise ValueError("PCA projections required for lens function")
         
-        if 'pca_2d' in projections and metadata:
-            pc1 = projections['pca_2d'][:, 0]
-            pc1_norm = (pc1 - np.mean(pc1)) / (np.std(pc1) + 1e-8)
-            
-            # PC1 + Validation Loss (if available)
-            val_losses = [m.get('val_loss') for m in metadata]
-            if any(v is not None for v in val_losses):
-                val_losses = np.array([v if v is not None else np.mean([x for x in val_losses if x is not None]) for v in val_losses])
-                val_loss_norm = (val_losses - np.mean(val_losses)) / (np.std(val_losses) + 1e-8)
-                lens_functions['pc1_valloss'] = np.column_stack([pc1_norm, val_loss_norm])
-            
-            # PC1 + Epoch
-            epochs = np.array([m['epoch'] for m in metadata])
-            epoch_norm = (epochs - np.mean(epochs)) / (np.std(epochs) + 1e-8)
-            lens_functions['pc1_epoch'] = np.column_stack([pc1_norm, epoch_norm])
+        pca_result = projections['pca']
         
-        if 'pca_extended' in projections and projections['pca_extended'].shape[1] >= 3:
-            pc1 = projections['pca_extended'][:, 0]
-            pc3 = projections['pca_extended'][:, 2]
-            pc1_norm = (pc1 - np.mean(pc1)) / (np.std(pc1) + 1e-8)
-            pc3_norm = (pc3 - np.mean(pc3)) / (np.std(pc3) + 1e-8)
-            lens_functions['pc1_pc3'] = np.column_stack([pc1_norm, pc3_norm])
+        # Extract PC1 and PC2
+        pc1 = pca_result[:, 0]
+        pc2 = pca_result[:, 1]
         
-        if 'tsne_2d' in projections:
-            tsne = projections['tsne_2d']
-            tsne_norm = (tsne - np.mean(tsne, axis=0)) / (np.std(tsne, axis=0) + 1e-8)
-            lens_functions['tsne'] = tsne_norm
+        # Normalize each dimension separately
+        pc1_norm = (pc1 - np.mean(pc1)) / (np.std(pc1) + 1e-8)
+        pc2_norm = (pc2 - np.mean(pc2)) / (np.std(pc2) + 1e-8)
         
-        return lens_functions
+        # Combine into 2D lens
+        lens = np.column_stack([pc1_norm, pc2_norm])
+        
+        print(f"  ✅ Created 2D lens: PC1+PC2 shape {lens.shape}")
+        return lens
+
+    @staticmethod
+    def create_umap_lens(projections, metadata):
+        print("🔍 Creating UMAP lens function...")
+        
+        if 'pca' not in projections:
+            raise ValueError("PCA projections required for UMAP lens function")
+        
+        # Extract PCA data from projections dictionary
+        pca_data = projections['pca']
+        
+        # Apply UMAP to the PCA data
+        umap_result = UMAP(n_components=2, random_state=42).fit_transform(pca_data)
+        
+        print(f"  ✅ Created 2D lens: UMAP shape {umap_result.shape}")
+        return umap_result
 
 
 class MapperEngine:
-    def __init__(self, n_cubes=10, perc_overlap=0.5, n_clusters=3, random_state=42):
+    def __init__(self, n_cubes=8, perc_overlap=0.5, n_clusters=5, random_state=42):
+        # Note that we choose perc_overlap to be the smallest where we have 1 connected component
         self.n_cubes = n_cubes
         self.perc_overlap = perc_overlap
         self.n_clusters = n_clusters
@@ -245,21 +232,128 @@ class MapperEngine:
         # Normalize lens data
         lens_normalized = self.scaler.fit_transform(lens)
         
-        # Use density-aware cover
+        # Create cover appropriate for lens dimensions
+        lens_dim = lens_normalized.shape[1]
+        
+        # span = np.ptp(lens_normalized, axis=0)
+        # cube_len = 0.2 * span
+        # _cubes = np.ceil(span / cube_len).astype(int)
+        # print(f"  Creating cover for {lens_dim}D lens with {_cubes} cubes per dimension")
+
         try:
-            cover = km.BallsCover(n_balls=self.n_cubes, perc_overlap=self.perc_overlap)
-        except AttributeError:
-            # Fallback to regular cover if BallsCover not available
-            print(f"Balls Cover error {e}")
+            if lens_dim == 3:
+                # For 3D lens, use fewer cubes per dimensions
+                cover = km.Cover(n_cubes=self.n_cubes * 3, perc_overlap=self.perc_overlap)
+            else:
+                # For 2D or other dimensions
+                cover = km.Cover(n_cubes=self.n_cubes, perc_overlap=self.perc_overlap)
+        except Exception as e:
+            print(f"  Cover creation error: {e}, using default cover")
             cover = km.Cover(n_cubes=self.n_cubes, perc_overlap=self.perc_overlap)
         
-        # Create the simplicial complex using normalized lens
-        simplicial_complex = self.mapper.map(
-            lens_normalized,
-            X=projections,
-            cover=cover,
-            clusterer=DBSCAN(eps=0.5, min_samples=3)
-        )
+        # Try different clusterers and choose the best one
+        clusterers_to_try = [
+            ('KMeans', KMeans(n_clusters=self.n_clusters, random_state=self.random_state, n_init=10)),
+            # ('Hierarchical', AgglomerativeClustering(n_clusters=self.n_clusters)),
+            #('DBSCAN', clusterer)
+        ]
+        
+        best_complex = None
+        best_score = -1
+        best_clusterer_name = None
+        
+        for clusterer_name, clusterer in clusterers_to_try:
+            try:
+                print(f"    Trying {clusterer_name} clustering...")
+                complex_candidate = self.mapper.map(
+                    lens_normalized,
+                    X=projections,
+                    cover=cover,
+                    clusterer=clusterer
+                )
+                
+                # Score based on barcode metrics and graph structure
+                n_nodes = len(complex_candidate['nodes'])
+                n_edges = len(complex_candidate['links'])
+                
+                if n_nodes > 0:
+                    # Compute barcode metrics for this clustering
+                    temp_metrics = self.compute_lens_metrics(lens_normalized, projections, complex_candidate)
+                    
+                    # Extract barcode features
+                    h0_features = temp_metrics.get('h0_num_features', 0)
+                    h1_features = temp_metrics.get('h1_num_features', 0)
+                    h0_max_life = temp_metrics.get('h0_max_lifetime', 0.0)
+                    h1_max_life = temp_metrics.get('h1_max_lifetime', 0.0)
+                    persistence_mean = temp_metrics.get('persistence_mean', 0.0)
+                    
+                    # Composite score combining multiple factors
+                    # 1. Graph structure (nodes and connectivity)
+                    connectivity_score = n_edges / max(n_nodes, 1)
+                    structure_score = n_nodes * (1 - abs(connectivity_score - 1.5) / 5)
+                    
+                    # 2. Topological richness (prefer some H1 features but not too many)
+                    h1_score = min(h1_features, 5) * 2  # Reward 1-5 loops, diminishing returns after
+                    
+                    # 3. Persistence quality (longer-lived features are better)
+                    persistence_score = persistence_mean * 10
+                    
+                    # 4. Balanced homology (prefer some H0 diversity but not fragmentation)
+                    h0_score = max(0, 10 - abs(h0_features - 5))  # Optimal around 5 components
+                    
+                    # Combined score
+                    score = structure_score + h1_score + persistence_score + h0_score
+                    
+                    print(f"      {clusterer_name}: {n_nodes} nodes, {n_edges} edges")
+                    print(f"        H0: {h0_features}, H1: {h1_features}, persist: {persistence_mean:.3f}, score: {score:.2f}")
+                    
+                    if score > best_score:
+                        best_score = score
+                        best_complex = complex_candidate
+                        best_clusterer_name = clusterer_name
+                else:
+                    print(f"      {clusterer_name}: No nodes generated")
+                    
+            except Exception as e:
+                print(f"      {clusterer_name} failed: {e}")
+                continue
+        
+        if best_complex is None:
+            print("    ⚠️ All clusterers failed, using simple fallback")
+            # Fallback to a simple clusterer
+            best_complex = self.mapper.map(
+                lens_normalized,
+                X=projections,
+                cover=cover,
+                clusterer=KMeans(n_clusters=2, random_state=self.random_state, n_init=10)
+            )
+            best_clusterer_name = "KMeans_fallback"
+        
+        print(f"    ✅ Selected {best_clusterer_name} clustering")
+        simplicial_complex = best_complex
+        
+        # Debug connectivity
+        n_nodes = len(simplicial_complex['nodes'])
+        n_edges = len(simplicial_complex['links'])
+        print(f"    Final graph: {n_nodes} nodes, {n_edges} edges")
+        
+        # Check if graph is connected using NetworkX
+        try:
+            import networkx as nx
+            G = nx.Graph()
+            G.add_nodes_from(simplicial_complex['nodes'].keys())
+            for link in simplicial_complex['links']:
+                if len(link) >= 2:
+                    G.add_edge(link[0], link[1])
+            
+            is_connected = nx.is_connected(G)
+            n_components = nx.number_connected_components(G)
+            print(f"    Graph connectivity: {is_connected}, Components: {n_components}")
+            
+            if not is_connected:
+                print(f"    ⚠️ Graph is disconnected! This may cause visualization differences.")
+        except Exception as e:
+            print(f"    Could not analyze connectivity: {e}")
         
         # Compute and store metrics
         metrics = self.compute_lens_metrics(lens_normalized, projections, simplicial_complex)
@@ -268,6 +362,7 @@ class MapperEngine:
         if 'meta' not in simplicial_complex:
             simplicial_complex['meta'] = {}
         simplicial_complex['meta'].update(metrics)
+        simplicial_complex['meta']['clusterer_used'] = best_clusterer_name
         
         return simplicial_complex
     
@@ -311,19 +406,53 @@ class MapperEngine:
         else:
             metrics['silhouette_score'] = 0.0
         
-        # Compute persistence for DBSCAN clusters
-        persistence_scores = []
-        for node_id, members in simplicial_complex['nodes'].items():
-            if len(members) > 1:
-                # Compute persistence as min distance to non-members
-                member_distances = cdist(lens[members], lens)
-                non_member_mask = ~np.isin(np.arange(len(lens)), members)
-                if np.any(non_member_mask):
-                    min_distances = np.min(member_distances[:, non_member_mask], axis=1)
-                    persistence_scores.extend(min_distances)
-        
-        metrics['persistence_mean'] = np.mean(persistence_scores) if persistence_scores else 0.0
-        metrics['persistence_std'] = np.std(persistence_scores) if persistence_scores else 0.0
+        # Compute genuine persistence barcode using Ripser
+        try:
+            # Use a subset of data for barcode computation (performance)
+            max_points_for_barcode = 620
+            if len(lens) > max_points_for_barcode:
+                indices = np.random.choice(len(lens), max_points_for_barcode, replace=False)
+                lens_subset = lens[indices]
+            else:
+                lens_subset = lens
+            
+            # Compute persistence diagrams using Ripser
+            print(f"    Computing barcode for {len(lens_subset)} points...")
+            diagrams = ripser.ripser(lens_subset, maxdim=1)['dgms']
+            
+            # Extract H0 (connected components) and H1 (loops) persistence
+            h0_persistence = diagrams[0]
+            h1_persistence = diagrams[1] if len(diagrams) > 1 else np.array([]).reshape(0, 2)
+            
+            # Compute barcode statistics
+            h0_lifetimes = h0_persistence[:, 1] - h0_persistence[:, 0]
+            h0_lifetimes = h0_lifetimes[np.isfinite(h0_lifetimes)]  # Remove infinite bars
+            
+            h1_lifetimes = h1_persistence[:, 1] - h1_persistence[:, 0]
+            h1_lifetimes = h1_lifetimes[np.isfinite(h1_lifetimes)]  # Remove infinite bars
+            
+            # Store barcode metrics
+            metrics['h0_num_features'] = len(h0_persistence)
+            metrics['h0_max_lifetime'] = np.max(h0_lifetimes) if len(h0_lifetimes) > 0 else 0.0
+            metrics['h0_mean_lifetime'] = np.mean(h0_lifetimes) if len(h0_lifetimes) > 0 else 0.0
+            
+            metrics['h1_num_features'] = len(h1_persistence)
+            metrics['h1_max_lifetime'] = np.max(h1_lifetimes) if len(h1_lifetimes) > 0 else 0.0
+            metrics['h1_mean_lifetime'] = np.mean(h1_lifetimes) if len(h1_lifetimes) > 0 else 0.0
+            
+            # Overall persistence score (combination of H0 and H1)
+            all_lifetimes = np.concatenate([h0_lifetimes, h1_lifetimes]) if len(h1_lifetimes) > 0 else h0_lifetimes
+            metrics['persistence_mean'] = np.mean(all_lifetimes) if len(all_lifetimes) > 0 else 0.0
+            metrics['persistence_std'] = np.std(all_lifetimes) if len(all_lifetimes) > 0 else 0.0
+            
+        except Exception as e:
+            print(f"    ⚠️ Barcode computation failed: {e}")
+            # Fallback to zero values
+            metrics.update({
+                'h0_num_features': 0, 'h0_max_lifetime': 0.0, 'h0_mean_lifetime': 0.0,
+                'h1_num_features': 0, 'h1_max_lifetime': 0.0, 'h1_mean_lifetime': 0.0,
+                'persistence_mean': 0.0, 'persistence_std': 0.0
+            })
         
         return metrics
     
@@ -367,12 +496,29 @@ class PlotEngine:
         km.draw_matplotlib(simplicial_complex)
         plt.title(f"Mapper Visualization - {optimizer}")
         
-        # Add metrics text box
+        # Add metrics text box including connectivity info
         trust = metrics.get('trustworthiness', 0.0)
         persistence_mean = metrics.get('persistence_mean', 0.0)
         silhouette = metrics.get('silhouette_score', 0.0)
         
-        metrics_text = (f"Trustworthiness: {trust:.3f}\n"
+        # Check connectivity for display
+        n_nodes = len(simplicial_complex['nodes'])
+        n_edges = len(simplicial_complex['links'])
+        
+        try:
+            import networkx as nx
+            G = nx.Graph()
+            G.add_nodes_from(simplicial_complex['nodes'].keys())
+            for link in simplicial_complex['links']:
+                if len(link) >= 2:
+                    G.add_edge(link[0], link[1])
+            n_components = nx.number_connected_components(G)
+        except:
+            n_components = "?"
+        
+        metrics_text = (f"Nodes: {n_nodes}, Edges: {n_edges}\n"
+                       f"Components: {n_components}\n"
+                       f"Trustworthiness: {trust:.3f}\n"
                        f"Persistence: {persistence_mean:.3f}\n"
                        f"Silhouette: {silhouette:.3f}")
         plt.text(0.02, 0.98, metrics_text, transform=plt.gca().transAxes,
@@ -390,14 +536,11 @@ class PlotEngine:
         try:
             html_path = self.output_dir / f"{optimizer}_mapper_interactive.html"
             
-            # Create custom tooltips
-            custom_tooltips = [f"Epoch: {m['epoch']}, Loss: {m.get('val_loss', 'N/A')}" for m in metadata]
-            
             # Use kmapper's plotlyviz for interactive visualization
-            fig = km.plotlyviz(
+            # Note: plotlyviz doesn't support custom_tooltips parameter
+            fig = plotlyviz(
                 simplicial_complex, 
-                title=f"Mapper Visualization - {optimizer}",
-                custom_tooltips=custom_tooltips
+                title=f"Mapper Visualization - {optimizer}"
             )
             
             # Save the plotly figure as HTML
@@ -463,8 +606,11 @@ class MapperAnalyzer:
         # Create projections
         projections, pca = self.projection_engine.create_projections(trajectories)
         
-        # Create mapper
-        simplicial_complex = self.mapper_engine.create_mapper(projections)
+        # Create PC1+PC2 lens
+        #lens = self.projection_engine.create_pc1_pc2_lens(projections, metadata)
+        lens = self.projection_engine.create_umap_lens(projections, metadata)
+        # Create mapper using the lens
+        simplicial_complex = self.mapper_engine.create_mapper(projections['pca_50'], lens=lens)
         
         # Get all metrics from meta
         metrics = simplicial_complex.get('meta', {})
@@ -488,14 +634,24 @@ class MapperAnalyzer:
             simplicial_complex, projections, metrics = result
             
             # Basic graph statistics
+            n_samples = len(projections['pca_50']) if isinstance(projections, dict) else len(projections)
             row = {
                 'optimizer': optimizer,
                 'n_nodes': len(simplicial_complex['nodes']),
                 'n_edges': len(simplicial_complex['links']),
-                'n_samples': len(projections),
+                'n_samples': n_samples,
+                'lens_type': 'UMAP',
+                'embedding_type': 'PCA_50',
+                'clusterer_used': metrics.get('clusterer_used', 'Unknown'),
                 'trustworthiness': metrics.get('trustworthiness', 0.0),
                 'persistence_mean': metrics.get('persistence_mean', 0.0),
                 'persistence_std': metrics.get('persistence_std', 0.0),
+                'h0_num_features': metrics.get('h0_num_features', 0),
+                'h0_max_lifetime': metrics.get('h0_max_lifetime', 0.0),
+                'h0_mean_lifetime': metrics.get('h0_mean_lifetime', 0.0),
+                'h1_num_features': metrics.get('h1_num_features', 0),
+                'h1_max_lifetime': metrics.get('h1_max_lifetime', 0.0),
+                'h1_mean_lifetime': metrics.get('h1_mean_lifetime', 0.0),
                 'silhouette_score': metrics.get('silhouette_score', 0.0)
             }
             
@@ -598,12 +754,15 @@ class AnalysisEngine:
     def _create_comparison_plot(self, all_results):
         print("\n📊 Creating comparison plot")
         
-        # Create a simple bar chart comparing key metrics
+        # Create a comprehensive bar chart comparing key metrics including barcode features
         optimizers = []
         trustworthiness_scores = []
         silhouette_scores = []
         nodes_count = []
         edges_count = []
+        h0_features = []
+        h1_features = []
+        persistence_scores = []
         
         for optimizer, result in all_results.items():
             if result is None:
@@ -613,6 +772,9 @@ class AnalysisEngine:
             _, _, metrics = result
             trustworthiness_scores.append(metrics.get('trustworthiness', 0.0))
             silhouette_scores.append(metrics.get('silhouette_score', 0.0))
+            h0_features.append(metrics.get('h0_num_features', 0))
+            h1_features.append(metrics.get('h1_num_features', 0))
+            persistence_scores.append(metrics.get('persistence_mean', 0.0))
             
             # Get from the simplicial complex
             simplicial_complex, _, _ = result
@@ -623,9 +785,9 @@ class AnalysisEngine:
             print("  ❌ No data to plot")
             return
         
-        # Create figure with multiple subplots
-        fig, axes = plt.subplots(2, 2, figsize=(15, 12))
-        fig.suptitle('Mapper Analysis Comparison', fontsize=16)
+        # Create figure with multiple subplots including barcode metrics
+        fig, axes = plt.subplots(3, 3, figsize=(18, 15))
+        fig.suptitle('Mapper Analysis Comparison with Barcode Metrics', fontsize=16)
         
         # Plot 1: Trustworthiness comparison
         axes[0,0].bar(optimizers, trustworthiness_scores)
@@ -639,17 +801,59 @@ class AnalysisEngine:
         axes[0,1].set_ylabel('Silhouette Score')
         axes[0,1].tick_params(axis='x', rotation=45)
         
-        # Plot 3: Number of nodes
+        # Plot 3: Persistence mean comparison
+        axes[0,2].bar(optimizers, persistence_scores)
+        axes[0,2].set_title('Persistence Score Comparison')
+        axes[0,2].set_ylabel('Mean Persistence')
+        axes[0,2].tick_params(axis='x', rotation=45)
+        
+        # Plot 4: Number of nodes
         axes[1,0].bar(optimizers, nodes_count)
         axes[1,0].set_title('Number of Nodes')
         axes[1,0].set_ylabel('Node Count')
         axes[1,0].tick_params(axis='x', rotation=45)
         
-        # Plot 4: Number of edges
+        # Plot 5: Number of edges
         axes[1,1].bar(optimizers, edges_count)
         axes[1,1].set_title('Number of Edges')
         axes[1,1].set_ylabel('Edge Count')
         axes[1,1].tick_params(axis='x', rotation=45)
+        
+        # Plot 6: H0 Features (Connected Components)
+        axes[1,2].bar(optimizers, h0_features)
+        axes[1,2].set_title('H0 Features (Connected Components)')
+        axes[1,2].set_ylabel('Number of H0 Features')
+        axes[1,2].tick_params(axis='x', rotation=45)
+        
+        # Plot 7: H1 Features (Loops)
+        axes[2,0].bar(optimizers, h1_features)
+        axes[2,0].set_title('H1 Features (Loops)')
+        axes[2,0].set_ylabel('Number of H1 Features')
+        axes[2,0].tick_params(axis='x', rotation=45)
+        
+        # Plot 8: Topological Complexity (H0 vs H1)
+        axes[2,1].scatter(h0_features, h1_features, s=100)
+        for i, opt in enumerate(optimizers):
+            axes[2,1].annotate(opt, (h0_features[i], h1_features[i]), 
+                              xytext=(5, 5), textcoords='offset points', fontsize=8)
+        axes[2,1].set_title('Topological Complexity')
+        axes[2,1].set_xlabel('H0 Features')
+        axes[2,1].set_ylabel('H1 Features')
+        
+        # Plot 9: Overall Quality Score
+        quality_scores = []
+        for i in range(len(optimizers)):
+            # Compute combined quality score
+            quality = (trustworthiness_scores[i] * 100 + 
+                      persistence_scores[i] * 50 + 
+                      min(h1_features[i], 5) * 10 +
+                      max(0, 10 - abs(h0_features[i] - 5)))
+            quality_scores.append(quality)
+        
+        axes[2,2].bar(optimizers, quality_scores)
+        axes[2,2].set_title('Overall Quality Score')
+        axes[2,2].set_ylabel('Combined Quality Score')
+        axes[2,2].tick_params(axis='x', rotation=45)
         
         # Adjust layout
         plt.tight_layout()
