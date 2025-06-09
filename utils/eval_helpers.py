@@ -41,7 +41,6 @@ def run_posterior_eval(
         loss_fn=torch.nn.CrossEntropyLoss(),
         mode=["mean", "mode", "std", "logits", "prob"],
     )
-    #evaluate_predictions(preds, dataloader, label)
     return preds
 
 def compute_loss(mswag, dataloader, num_samples):
@@ -71,15 +70,12 @@ def _clear_gpu_memory():
 def _move_to_cpu_and_cleanup(mswag):
     """Move model to CPU and cleanup GPU memory."""
     try:
-        # For MultiSWAG, use the inherited cleanup method from Infer
-        # The particles are managed by push_dist, not directly accessible
+
         if hasattr(mswag, 'push_dist') and hasattr(mswag.push_dist, '_cleanup'):
             mswag.push_dist._cleanup()
         
-        # Delete the mswag object
         del mswag
         
-        # Clear GPU memory
         _clear_gpu_memory()
         
     except Exception as e:
@@ -93,10 +89,8 @@ def evaluate_all_epochs(args):
     Args:
         args: Arguments containing model and evaluation parameters
     """
-    # Clear GPU memory at start
     _clear_gpu_memory()
     
-    # Build test dataloaders
     test_dataloader, test_corrupt_dataloader = build_test_dataloaders(
         args.data_dir,
         args.batch_size,
@@ -104,7 +98,6 @@ def evaluate_all_epochs(args):
         corrupt_transform=get_corrupt_transform(),
     )
     
-    # Build train dataloader for training loss computation
     train_dataloader, _, _ = build_train_dataloaders(
         args.data_dir,
         args.batch_size,
@@ -123,7 +116,6 @@ def evaluate_all_epochs(args):
         },
     )
     
-    # Evaluation parameters
     eval_params = {
         'scale': getattr(args, 'scale', 1.0),
         'num_samples': getattr(args, 'num_samples', 10),
@@ -131,27 +123,22 @@ def evaluate_all_epochs(args):
         'f_reg': False,
     }
     
-    # Create results directories
     os.makedirs(f"results/{args.optimizer}/evaluation_results", exist_ok=True)
     
-    # Evaluate pretrain epochs
     print("Evaluating pretrain epochs...")
-    for epoch in tqdm(range(args.pretrain_epochs + 1)):  # +1 to include epoch 0
+    for epoch in tqdm(range(args.pretrain_epochs + 1)):
         _evaluate_pretrain_epoch(
             epoch, args.optimizer, model_args, test_dataloader, test_corrupt_dataloader,
             train_dataloader, eval_params, args.num_models
         )
-        # Clear memory after each epoch
         _clear_gpu_memory()
     
-    # Evaluate SWAG epochs  
     print("Evaluating SWAG epochs...")
-    for epoch in tqdm(range(args.swag_epochs + 1)):  # +1 to include epoch 0
+    for epoch in tqdm(range(args.swag_epochs + 1)):
         _evaluate_swag_epoch(
             epoch, args.optimizer, model_args, test_dataloader, test_corrupt_dataloader,
             train_dataloader, eval_params, args.num_models
         )
-        # Clear memory after each epoch
         _clear_gpu_memory()
     
     print(f"Evaluation complete! Results saved in results/{args.optimizer}/evaluation_results/")
@@ -162,12 +149,10 @@ def _compute_pretrain_loss_simple_ensemble(optimizer, epoch, model_args, dataloa
     from models.MLP import MLP
     import os
     
-    # Create individual model instances
     models = []
     device = "cuda" if torch.cuda.is_available() else "cpu"
     
     for model_num in range(num_models):
-        # Load weights for this model
         weights_dir = os.path.join("results", optimizer, "pretrain_weights")
         weights_path = os.path.join(weights_dir, f"particle{model_num}_epoch{epoch}_weights.pt")
         
@@ -175,7 +160,6 @@ def _compute_pretrain_loss_simple_ensemble(optimizer, epoch, model_args, dataloa
             print(f"Warning: Weights not found for model {model_num} epoch {epoch}")
             continue
             
-        # Create model and load weights
         model = MLP(model_args[0]).to(device)
         state_dict = torch.load(weights_path, map_location=device)
         model.load_state_dict(state_dict)
@@ -196,21 +180,17 @@ def _compute_pretrain_loss_simple_ensemble(optimizer, epoch, model_args, dataloa
             data = data.to(device)
             target = target.to(device)
             
-            # Get predictions from all models
             all_preds = []
             for model in models:
                 pred = model(data)
                 all_preds.append(pred)
             
-            # Average predictions across ensemble
             ensemble_pred = torch.stack(all_preds).mean(dim=0)
             
-            # Check for NaN
             if torch.isnan(ensemble_pred).any():
                 print(f"Warning: NaN in ensemble predictions, skipping batch")
                 continue
             
-            # Compute loss
             if eval_params['f_reg']:
                 loss = torch.nn.MSELoss()(ensemble_pred, target)
             else:
@@ -224,7 +204,6 @@ def _compute_pretrain_loss_simple_ensemble(optimizer, epoch, model_args, dataloa
                 total_loss += loss.item()
                 num_batches += 1
     
-    # Cleanup models
     del models
     torch.cuda.empty_cache() if torch.cuda.is_available() else None
     
@@ -236,12 +215,10 @@ def _run_pretrain_eval_simple_ensemble(optimizer, epoch, model_args, dataloader,
     from models.MLP import MLP
     import os
     
-    # Create individual model instances
     models = []
     device = "cuda" if torch.cuda.is_available() else "cpu"
     
     for model_num in range(num_models):
-        # Load weights for this model
         weights_dir = os.path.join("results", optimizer, "pretrain_weights")
         weights_path = os.path.join(weights_dir, f"particle{model_num}_epoch{epoch}_weights.pt")
         
@@ -249,7 +226,6 @@ def _run_pretrain_eval_simple_ensemble(optimizer, epoch, model_args, dataloader,
             print(f"Warning: Weights not found for model {model_num} epoch {epoch}")
             continue
             
-        # Create model and load weights
         model = MLP(model_args[0]).to(device)
         state_dict = torch.load(weights_path, map_location=device)
         model.load_state_dict(state_dict)
@@ -268,25 +244,20 @@ def _run_pretrain_eval_simple_ensemble(optimizer, epoch, model_args, dataloader,
         for data, _ in dataloader:
             data = data.to(device)
             
-            # Get predictions from all models
             batch_preds = []
             for model in models:
                 pred = model(data)
                 batch_preds.append(pred)
             
-            # Stack predictions: [num_models, batch_size, num_classes]
             stacked_preds = torch.stack(batch_preds)
             
-            # Check for NaN
             if torch.isnan(stacked_preds).any():
                 print(f"Warning: NaN in batch predictions, skipping batch")
                 continue
             
-            # Compute ensemble statistics
             batch_results = {}
             
             if eval_params['f_reg']:
-                # Regression modes
                 if "mean" in eval_params['mode']:
                     batch_results["mean"] = stacked_preds.mean(dim=0)
                 if "std" in eval_params['mode']:
@@ -298,29 +269,24 @@ def _run_pretrain_eval_simple_ensemble(optimizer, epoch, model_args, dataloader,
                 if "prob" in eval_params['mode']:
                     batch_results["prob"] = stacked_preds.mean(dim=0)
             else:
-                # Classification modes
                 if "logits" in eval_params['mode']:
                     batch_results["logits"] = stacked_preds.mean(dim=0)
                 if "mean" in eval_params['mode']:
                     batch_results["mean"] = stacked_preds.mean(dim=0).argmax(dim=1)
                 if "mode" in eval_params['mode']:
-                    # Get mode across ensemble predictions
                     pred_classes = stacked_preds.argmax(dim=2)  # [num_models, batch_size]
                     batch_results["mode"] = torch.mode(pred_classes, dim=0).values
                 if "prob" in eval_params['mode']:
-                    # Average softmax probabilities
                     softmax_preds = torch.softmax(stacked_preds, dim=2)
                     batch_results["prob"] = softmax_preds.mean(dim=0)
                 if "std" in eval_params['mode']:
                     softmax_preds = torch.softmax(stacked_preds, dim=2)
                     batch_results["std"] = softmax_preds.std(dim=0)
             
-            # Accumulate results
             for mode in eval_params['mode']:
                 if mode in batch_results:
                     all_preds[mode].append(batch_results[mode].cpu())
     
-    # Concatenate all batch results
     final_preds = {}
     for mode in eval_params['mode']:
         if mode in all_preds and len(all_preds[mode]) > 0:
@@ -329,7 +295,6 @@ def _run_pretrain_eval_simple_ensemble(optimizer, epoch, model_args, dataloader,
             print(f"Warning: No valid predictions for mode {mode}")
             return None
     
-    # Cleanup models
     del models
     torch.cuda.empty_cache() if torch.cuda.is_available() else None
     
@@ -342,15 +307,12 @@ def _evaluate_pretrain_epoch(epoch, optimizer, model_args, test_dataloader, test
     try:
         print(f"Debug: Evaluating pretrain epoch {epoch} using simple ensemble")
         
-        # Compute training loss using simple ensemble
         train_loss = _compute_pretrain_loss_simple_ensemble(
             optimizer, epoch, model_args, train_dataloader, eval_params, num_models
         )
         
-        # Save training loss
         _save_training_loss(train_loss, optimizer, epoch, "pretrain")
         
-        # Evaluate on test sets using simple ensemble
         test_preds = _run_pretrain_eval_simple_ensemble(
             optimizer, epoch, model_args, test_dataloader, eval_params, num_models
         )
@@ -400,7 +362,6 @@ def _evaluate_swag_epoch(epoch, optimizer, model_args, test_dataloader, test_cor
         # # Save training loss
         # _save_training_loss(train_loss, optimizer, epoch, "swag")
         
-        # Evaluate on test sets using SWAG sampling
         if eval_params['f_reg']:
             loss_fn = torch.nn.MSELoss()
         else:
@@ -426,43 +387,36 @@ def _evaluate_swag_epoch(epoch, optimizer, model_args, test_dataloader, test_cor
             f_reg=eval_params['f_reg']
         )
         
-        # Print test accuracies
         if not eval_params['f_reg'] and 'mean' in test_preds and 'mode' in test_preds:
-            # Get test dataset targets
+            # NOTE: Test is actually validation set
             test_targets = []
             for _, target in test_dataloader:
                 test_targets.append(target)
             test_targets = torch.cat(test_targets, dim=0)
             
-            # Convert targets to class indices if needed
             if test_targets.dim() == 2:
                 test_targets = test_targets.argmax(dim=1)
             
-            # Compute accuracies
             test_mean_acc = (test_preds["mean"] == test_targets).float().mean()
             test_mode_acc = (test_preds["mode"] == test_targets).float().mean()
             
             print(f"Debug: Test Mean Accuracy: {test_mean_acc:.4f}")
             print(f"Debug: Test Mode Accuracy: {test_mode_acc:.4f}")
             
-            # Get test_corrupt dataset targets
             test_corrupt_targets = []
             for _, target in test_corrupt_dataloader:
                 test_corrupt_targets.append(target)
             test_corrupt_targets = torch.cat(test_corrupt_targets, dim=0)
             
-            # Convert targets to class indices if needed
             if test_corrupt_targets.dim() == 2:
                 test_corrupt_targets = test_corrupt_targets.argmax(dim=1)
             
-            # Compute accuracies for corrupted test set
             test_corrupt_mean_acc = (test_corrupt_preds["mean"] == test_corrupt_targets).float().mean()
             test_corrupt_mode_acc = (test_corrupt_preds["mode"] == test_corrupt_targets).float().mean()
             
             print(f"Debug: Test Corrupt Mean Accuracy: {test_corrupt_mean_acc:.4f}")
             print(f"Debug: Test Corrupt Mode Accuracy: {test_corrupt_mode_acc:.4f}")
         
-        # Save predictions
         _save_predictions(test_preds, optimizer, epoch, "swag", "test")
         _save_predictions(test_corrupt_preds, optimizer, epoch, "swag", "test_corrupt")
         
@@ -471,62 +425,49 @@ def _evaluate_swag_epoch(epoch, optimizer, model_args, test_dataloader, test_cor
     except Exception as e:
         print(f"Error evaluating SWAG epoch {epoch}: {e}")
     finally:
-        # Always cleanup, even if there was an error
         if mswag is not None:
             _move_to_cpu_and_cleanup(mswag)
 
 
 def _compute_swag_loss(mswag, dataloader, eval_params):
     """Compute loss for SWAG model using mean weights."""
-    # Use the full dataloader to get predictions, then compute loss separately
     if eval_params['f_reg']:
         loss_fn = torch.nn.MSELoss()
         modes = ["mean"]
     else:
-        # Use a loss function that won't cause shape issues during internal computation
         loss_fn = torch.nn.CrossEntropyLoss()
-        # Only request logits to avoid internal loss computation issues
         modes = ["logits"]
     
     preds = mswag.posterior_pred(
         dataloader,
         loss_fn=loss_fn,
         num_samples=1,  # Just use mean
-        # scale=0.0,      # No sampling, just mean
+        # scale=0.0,
         var_clamp=1e-30,
         mode=modes,
         f_reg=eval_params['f_reg']
     )
     
-    # Get targets from the dataloader
     all_targets = []
     for _, target in dataloader:
         all_targets.append(target)
     all_targets = torch.cat(all_targets, dim=0)
     
-    # Compute loss based on task type
     if eval_params['f_reg']:
-        # Regression: use mean predictions
         loss = torch.nn.MSELoss()(preds["mean"], all_targets)
     else:
-        # Classification: use logits for CrossEntropyLoss
         logits = preds["logits"]
         
-        # Handle the extra samples dimension: logits might be [batch_size, num_samples, num_classes]
-        # We need [batch_size, num_classes] for CrossEntropyLoss
+
         if logits.dim() == 3:
-            # Average across the samples dimension
             logits = logits.mean(dim=1)
         
-        # Ensure target is the right shape and type for CrossEntropyLoss
+
         if all_targets.dim() == 2:
-            # Targets are one-hot encoded, convert to class indices
             all_targets = all_targets.argmax(dim=1)
         elif all_targets.dim() == 1 and all_targets.dtype == torch.float:
-            # Targets might be float indices, convert to long
             all_targets = all_targets.long()
         
-        # Final check: ensure target is long type for CrossEntropyLoss
         if all_targets.dtype != torch.long:
             all_targets = all_targets.long()
         
@@ -566,12 +507,10 @@ def _save_predictions(pred_dict, optimizer, epoch, phase, dataset_name):
 def _compute_swag_loss_simple(optimizer, epoch, model_args, dataloader, eval_params, num_models):
     """Compute SWAG loss using mean weights only (no sampling)."""
     try:
-        # Load SWAG moments and extract mean weights
         models = []
         device = "cuda" if torch.cuda.is_available() else "cpu"
         
         for model_num in range(num_models):
-            # Load SWAG first moment (mean) for this model
             swag_dir = os.path.join("results", optimizer, "swag_moments")
             mom1_path = os.path.join(swag_dir, f"particle{model_num}_epoch{epoch}_mom1.pt")
             
@@ -579,24 +518,19 @@ def _compute_swag_loss_simple(optimizer, epoch, model_args, dataloader, eval_par
                 print(f"Warning: SWAG mom1 not found for model {model_num} epoch {epoch}")
                 continue
             
-            # Load first moment (mean weights)
             mom1_data = torch.load(mom1_path, map_location=device)
             print(f"Debug: Loaded mom1 for model {model_num}, type: {type(mom1_data)}")
             
-            # Create model to get the parameter structure
             model = MLP(model_args[0]).to(device)
             
-            # Convert mom1 data to state dict format
             if isinstance(mom1_data, list):
                 print(f"Debug: mom1 is list with {len(mom1_data)} tensors")
                 
-                # Check for NaN in loaded tensors
                 for i, tensor in enumerate(mom1_data):
                     if torch.isnan(tensor).any():
                         print(f"Debug: NaN found in mom1 tensor {i}")
                     print(f"Debug: Tensor {i} shape: {tensor.shape}, min: {tensor.min().item():.6f}, max: {tensor.max().item():.6f}")
                 
-                # mom1 is a list of tensors, need to map back to parameter names
                 state_dict = {}
                 param_names = list(model.state_dict().keys())
                 print(f"Debug: Model has {len(param_names)} parameters: {param_names}")
@@ -611,11 +545,9 @@ def _compute_swag_loss_simple(optimizer, epoch, model_args, dataloader, eval_par
                     continue
                     
             elif isinstance(mom1_data, dict):
-                # mom1 is already a state dict
                 state_dict = mom1_data
                 print(f"Debug: mom1 is dict with keys: {list(state_dict.keys())}")
                 
-                # Check for NaN in dict values
                 for k, v in state_dict.items():
                     if torch.isnan(v).any():
                         print(f"Debug: NaN found in dict parameter {k}")
@@ -623,11 +555,9 @@ def _compute_swag_loss_simple(optimizer, epoch, model_args, dataloader, eval_par
                 print(f"Warning: Unexpected mom1 data type: {type(mom1_data)}")
                 continue
             
-            # Load the reconstructed state dict
             model.load_state_dict(state_dict)
             model.eval()
             
-            # Test the model with a small sample
             with torch.no_grad():
                 test_input = torch.randn(2, model_args[0]['input_dim']).to(device)
                 test_output = model(test_input)
@@ -650,14 +580,13 @@ def _compute_swag_loss_simple(optimizer, epoch, model_args, dataloader, eval_par
         
         with torch.no_grad():
             for batch_idx, (data, target) in enumerate(dataloader):
-                if batch_idx >= 3:  # Only process first few batches for debugging
+                if batch_idx >= 3:
                     break
                     
                 data = data.to(device)
                 target = target.to(device)
                 print(f"Debug: Batch {batch_idx} - data shape: {data.shape}, target shape: {target.shape}")
                 
-                # Get predictions from all models using mean weights
                 all_preds = []
                 for model_idx, model in enumerate(models):
                     pred = model(data)
@@ -666,16 +595,13 @@ def _compute_swag_loss_simple(optimizer, epoch, model_args, dataloader, eval_par
                         print(f"Debug: Model {model_idx} pred min/max: {pred.min().item():.6f}/{pred.max().item():.6f}")
                     all_preds.append(pred)
                 
-                # Average predictions across ensemble
                 ensemble_pred = torch.stack(all_preds).mean(dim=0)
                 print(f"Debug: Ensemble pred shape: {ensemble_pred.shape}, has NaN: {torch.isnan(ensemble_pred).any()}")
                 
-                # Check for NaN
                 if torch.isnan(ensemble_pred).any():
                     print(f"Warning: NaN in SWAG ensemble predictions, skipping batch")
                     continue
                 
-                # Compute loss
                 if eval_params['f_reg']:
                     loss = torch.nn.MSELoss()(ensemble_pred, target)
                 else:
@@ -695,7 +621,6 @@ def _compute_swag_loss_simple(optimizer, epoch, model_args, dataloader, eval_par
                 else:
                     print(f"Debug: NaN loss in batch {batch_idx}")
         
-        # Cleanup models
         del models
         torch.cuda.empty_cache() if torch.cuda.is_available() else None
         
@@ -713,12 +638,10 @@ def _compute_swag_loss_simple(optimizer, epoch, model_args, dataloader, eval_par
 def _run_swag_eval_simple(optimizer, epoch, model_args, dataloader, eval_params, num_models):
     """Run SWAG evaluation using mean weights only (no sampling)."""
     try:
-        # Load SWAG moments and extract mean weights
         models = []
         device = "cuda" if torch.cuda.is_available() else "cpu"
         
         for model_num in range(num_models):
-            # Load SWAG first moment (mean) for this model
             swag_dir = os.path.join("results", optimizer, "swag_moments")
             mom1_path = os.path.join(swag_dir, f"particle{model_num}_epoch{epoch}_mom1.pt")
             
@@ -726,15 +649,11 @@ def _run_swag_eval_simple(optimizer, epoch, model_args, dataloader, eval_params,
                 print(f"Warning: SWAG mom1 not found for model {model_num} epoch {epoch}")
                 continue
             
-            # Load first moment (mean weights)
             mom1_data = torch.load(mom1_path, map_location=device)
             
-            # Create model to get the parameter structure
             model = MLP(model_args[0]).to(device)
             
-            # Convert mom1 data to state dict format
             if isinstance(mom1_data, list):
-                # mom1 is a list of tensors, need to map back to parameter names
                 state_dict = {}
                 param_names = list(model.state_dict().keys())
                 
@@ -746,13 +665,11 @@ def _run_swag_eval_simple(optimizer, epoch, model_args, dataloader, eval_params,
                     continue
                     
             elif isinstance(mom1_data, dict):
-                # mom1 is already a state dict
                 state_dict = mom1_data
             else:
                 print(f"Warning: Unexpected mom1 data type: {type(mom1_data)}")
                 continue
             
-            # Load the reconstructed state dict
             model.load_state_dict(state_dict)
             model.eval()
             models.append(model)
@@ -769,21 +686,17 @@ def _run_swag_eval_simple(optimizer, epoch, model_args, dataloader, eval_params,
             for data, _ in dataloader:
                 data = data.to(device)
                 
-                # Get predictions from all models using mean weights
                 batch_preds = []
                 for model in models:
                     pred = model(data)
                     batch_preds.append(pred)
                 
-                # Stack predictions: [num_models, batch_size, num_classes]
                 stacked_preds = torch.stack(batch_preds)
                 
-                # Check for NaN
                 if torch.isnan(stacked_preds).any():
                     print(f"Warning: NaN in batch predictions, skipping batch")
                     continue
                 
-                # Compute ensemble statistics (same as pretrain)
                 batch_results = {}
                 
                 if eval_params['f_reg']:
@@ -805,23 +718,19 @@ def _run_swag_eval_simple(optimizer, epoch, model_args, dataloader, eval_params,
                     if "mean" in eval_params['mode']:
                         batch_results["mean"] = stacked_preds.mean(dim=0).argmax(dim=1)
                     if "mode" in eval_params['mode']:
-                        # Get mode across ensemble predictions
-                        pred_classes = stacked_preds.argmax(dim=2)  # [num_models, batch_size]
+                        pred_classes = stacked_preds.argmax(dim=2)
                         batch_results["mode"] = torch.mode(pred_classes, dim=0).values
                     if "prob" in eval_params['mode']:
-                        # Average softmax probabilities
                         softmax_preds = torch.softmax(stacked_preds, dim=2)
                         batch_results["prob"] = softmax_preds.mean(dim=0)
                     if "std" in eval_params['mode']:
                         softmax_preds = torch.softmax(stacked_preds, dim=2)
                         batch_results["std"] = softmax_preds.std(dim=0)
                 
-                # Accumulate results
                 for mode in eval_params['mode']:
                     if mode in batch_results:
                         all_preds[mode].append(batch_results[mode].cpu())
         
-        # Concatenate all batch results
         final_preds = {}
         for mode in eval_params['mode']:
             if mode in all_preds and len(all_preds[mode]) > 0:
@@ -830,7 +739,6 @@ def _run_swag_eval_simple(optimizer, epoch, model_args, dataloader, eval_params,
                 print(f"Warning: No valid predictions for mode {mode}")
                 return None
         
-        # Cleanup models
         del models
         torch.cuda.empty_cache() if torch.cuda.is_available() else None
         
@@ -847,7 +755,6 @@ def _get_dataset_size(dataloader):
     if hasattr(dataloader.dataset, '__len__'):
         return len(dataloader.dataset)
     else:
-        # Fallback: iterate through dataloader once to count
         total_size = 0
         for batch_data, _ in dataloader:
             total_size += batch_data.size(0)
