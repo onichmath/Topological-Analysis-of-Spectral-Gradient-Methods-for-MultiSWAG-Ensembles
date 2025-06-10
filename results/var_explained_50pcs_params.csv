@@ -1,0 +1,8 @@
+optimizer,variance_explained
+muon10p,96.2
+muonspectralnorm,95.4
+adamw,94.3
+10p,94.3
+spectralnorm,94.3
+muon,92.3
+adam,64.4
