@@ -246,6 +246,8 @@ class MapperEngine:
             else:
                 # For 2D or other dimensions
                 cover = km.Cover(n_cubes=self.n_cubes, perc_overlap=self.perc_overlap)
+                #cover = BallsCover(n_cubes=self.n_cubes, perc_overlap=self.perc_overlap)
+                #cover = quantile_cover_intervals(lens_normalized, self.n_cubes, self.perc_overlap)
         except Exception as e:
             print(f"  Cover creation error: {e}, using default cover")
             cover = km.Cover(n_cubes=self.n_cubes, perc_overlap=self.perc_overlap)
